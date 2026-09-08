@@ -57,10 +57,10 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "").strip()
 # 1. Google Gemini Cascade (Priority 1)
 GEMINI_CANDIDATE_MODELS = [m for m in [
     GEMINI_MODEL,
-    "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
     "gemini-flash-lite-latest",
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.8-flash",
     "gemini-3.7-flash",
@@ -808,8 +808,8 @@ async def auto_select_working_ai_models():
                     ]
                     if discovered_gemini:
                         pref_gemini = [
-                            "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
-                            "gemini-flash-lite-latest", "gemini-3.5-flash", "gemma-4-26b-a4b-it", "gemma-4-31b-it"
+                            "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest",
+                            "gemini-3.6-flash", "gemini-3.5-flash", "gemma-4-26b-a4b-it", "gemma-4-31b-it"
                         ]
                         ordered_gemini = [m for m in pref_gemini if m in discovered_gemini]
                         for m in discovered_gemini:
