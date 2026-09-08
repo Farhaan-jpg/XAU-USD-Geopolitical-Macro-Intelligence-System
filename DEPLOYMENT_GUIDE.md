@@ -90,6 +90,7 @@ Add the following keys:
 | `TELEGRAM_BOT_TOKEN` | `123456:ABC...` | (Optional) Telegram bot token from `@BotFather` |
 | `TELEGRAM_CHAT_ID` | `-100...` or `@channel` | (Optional) Telegram channel or group ID |
 | `TELEGRAM_NOTIFY_ALL_EVENTS` | `true` | Set to `true` to receive Telegram alerts for 100% of events (CRITICAL, HIGH, MEDIUM, LOW) |
+| `ZONE_PROXIMITY_BUFFER_USD` | `2.0` | Proximity alert distance buffer in USD (triggers Telegram alert when price nears within $2.00 of zone) |
 
 > [!TIP]
 > **Strict Cascading Priority Architecture**:
