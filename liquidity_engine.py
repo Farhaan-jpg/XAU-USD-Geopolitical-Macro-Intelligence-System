@@ -366,10 +366,10 @@ class LiquidityEngine:
         # trendState: 1 = Uptrend, -1 = Downtrend, 0 = Ranging/Chop
         if fast_ma > slow_ma and current_close > slow_ma:
             trend_state = 1
-            trend_label = "Bullish Continuation (EMA 50 > EMA 200 & Price > EMA 200)"
+            trend_label = "Bullish Continuation (EMA 50 above EMA 200, Price above EMA 200)"
         elif fast_ma < slow_ma and current_close < slow_ma:
             trend_state = -1
-            trend_label = "Bearish Continuation (EMA 50 < EMA 200 & Price < EMA 200)"
+            trend_label = "Bearish Continuation (EMA 50 below EMA 200, Price below EMA 200)"
         else:
             trend_state = 0
             trend_label = "Ranging / Consolidation"

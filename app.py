@@ -6,6 +6,7 @@ Includes OANDA Live Pricing Engine & Normalized Chronological Publication Sorter
 
 import asyncio
 import hashlib
+import html
 import json
 import logging
 import os
@@ -464,21 +465,25 @@ def format_telegram_alert(event: IntelligenceEvent, market_stats: Optional[Dict[
     else:
         market_bias_section = ""
 
+    safe_title = html.escape(event.title or "")
+    safe_source = html.escape(event.source or "")
+    safe_transmission = html.escape(event.transmission_mechanism or "")
+
     return (
         f"<b>{severity_badge}</b>\n"
         f"🏆 <b>Event Gold Bias:</b> {bias_emoji}\n"
-        f"⚡ <b>Expected Momentum:</b> <code>{event.potential_momentum}</code>\n\n"
+        f"⚡ <b>Expected Momentum:</b> <code>{html.escape(event.potential_momentum or '')}</code>\n\n"
         f"{market_bias_section}"
-        f"📰 <b>Headline:</b> {event.title}\n"
-        f"📡 <b>Source:</b> {event.source}\n\n"
+        f"📰 <b>Headline:</b> {safe_title}\n"
+        f"📡 <b>Source:</b> {safe_source}\n\n"
         f"🎯 <b>Transmission Mechanism:</b>\n"
-        f"<i>{event.transmission_mechanism}</i>\n\n"
+        f"<i>{safe_transmission}</i>\n\n"
         f"📊 <b>Correlated Assets Breakdown:</b>\n"
-        f"• <b>DXY:</b> {dxy_dir} ({corr.DXY.logic})\n"
-        f"• <b>US10Y TIPS:</b> {tips_dir} ({corr.US10Y_TIPS.logic})\n"
-        f"• <b>WTI Crude:</b> {oil_dir} ({corr.WTI_Crude.logic})\n"
-        f"• <b>Silver (XAG):</b> {silver_dir} ({corr.Silver_XAG.logic})\n"
-        f"• <b>VIX:</b> {vix_dir} ({corr.VIX.logic})\n\n"
+        f"• <b>DXY:</b> {dxy_dir} ({html.escape(corr.DXY.logic or '')})\n"
+        f"• <b>US10Y TIPS:</b> {tips_dir} ({html.escape(corr.US10Y_TIPS.logic or '')})\n"
+        f"• <b>WTI Crude:</b> {oil_dir} ({html.escape(corr.WTI_Crude.logic or '')})\n"
+        f"• <b>Silver (XAG):</b> {silver_dir} ({html.escape(corr.Silver_XAG.logic or '')})\n"
+        f"• <b>VIX:</b> {vix_dir} ({html.escape(corr.VIX.logic or '')})\n\n"
         f"🔗 <a href='{event.link}'>View Original Source</a> | ⏱ <i>{event.published_at}</i>"
     )
 
@@ -545,7 +550,30 @@ async def dispatch_telegram_alert(event: IntelligenceEvent):
                 _telegram_sent_event_ids.add(event.id)
                 logger.info("Telegram alert dispatched successfully for %s", event.id)
             else:
-                logger.warning("Telegram dispatch returned status %d: %s", resp.status_code, resp.text)
+                resp_desc = resp.text
+                try:
+                    resp_desc = resp.json().get("description", resp.text)
+                except Exception:
+                    pass
+
+                # If Telegram rejects HTML entities (HTTP 400), automatically retry plain text
+                if resp.status_code == 400 and "can't parse entities" in resp_desc.lower():
+                    logger.warning("Telegram rejected HTML entities for event %s, retrying plain text...", event.id)
+                    plain_text = re.sub(r"<[^>]+>", "", text)
+                    fallback_payload = {
+                        "chat_id": TELEGRAM_CHAT_ID,
+                        "text": plain_text,
+                        "disable_web_page_preview": False,
+                    }
+                    retry_resp = await client.post(url, json=fallback_payload)
+                    if retry_resp.status_code == 200:
+                        _telegram_sent_event_ids.add(event.id)
+                        logger.info("Telegram alert dispatched via plain-text fallback for %s", event.id)
+                        return
+                    else:
+                        logger.warning("Telegram plain-text retry failed: %s", retry_resp.text)
+
+                logger.warning("Telegram dispatch returned status %d: %s", resp.status_code, resp_desc)
     except Exception as e:
         logger.error("Error dispatching Telegram alert: %s", e)
 
@@ -578,26 +606,28 @@ def format_zone_telegram_alert(alert_event: ZoneAlertEvent, profile: Optional[Li
         "REVERSAL_SELL": "🟠 <b>COUNTER-TREND REVERSAL (SHORT REJECTION)</b>",
         "RANGE_BUY": "🔵 <b>RANGE SUPPORT BOUNCE</b>",
         "RANGE_SELL": "🔵 <b>RANGE RESISTANCE REJECTION</b>",
-    }.get(zone.signal, f"⚡ <b>{zone.signal}</b>")
+    }.get(zone.signal, f"⚡ <b>{html.escape(zone.signal)}</b>")
 
     apex_tag = " 🌟 <b>[APEX ZONE - MAXIMUM LIQUIDITY]</b>" if zone.is_apex else ""
     zone_category = "MAJOR APEX/MACRO ZONE" if zone.is_major else "HIGH-QUALITY PULLBACK ZONE"
 
     trend_info = ""
     if profile:
+        trend_label_safe = html.escape(profile.trend_label or "")
         trend_info = (
-            f"• <b>Dual-MA Trend Context:</b> {profile.trend_label}\n"
+            f"• <b>Dual-MA Trend Context:</b> {trend_label_safe}\n"
             f"• <b>Fast EMA (50):</b> ${profile.fast_ma:.2f} | <b>Slow EMA (200):</b> ${profile.slow_ma:.2f}\n"
             f"• <b>Point of Control (POC):</b> ${profile.poc_price:.2f} (Peak Vol: {profile.poc_volume:.1f})\n"
             f"• <b>ATR(5) Volatility:</b> ${profile.atr:.2f}"
         )
 
     sl_direction = "below zone lower bound" if zone.is_lower else "above zone upper bound"
+    safe_zone_type = html.escape(zone.zone_type or "")
 
     return (
         f"{header_badge}\n\n"
         f"🏆 <b>Symbol:</b> <code>XAU/USD (Spot Gold)</code>\n"
-        f"🏷 <b>Zone Type:</b> <b>{zone.zone_type}</b>{apex_tag}\n"
+        f"🏷 <b>Zone Type:</b> <b>{safe_zone_type}</b>{apex_tag}\n"
         f"📊 <b>Category:</b> <code>{zone_category}</code>\n"
         f"🎯 <b>Actionable Signal:</b> {signal_badge}\n\n"
         f"{status_line}\n"
@@ -611,10 +641,11 @@ def format_zone_telegram_alert(alert_event: ZoneAlertEvent, profile: Optional[Li
         f"⏱ <i>{alert_event.timestamp}</i>"
     )
 
-async def dispatch_zone_telegram_alert(alert_event: ZoneAlertEvent, profile: Optional[LiquidityProfileResult] = None) -> bool:
+async def dispatch_zone_telegram_alert(alert_event: ZoneAlertEvent, profile: Optional[LiquidityProfileResult] = None) -> Dict[str, Any]:
     """
     Dispatches liquidity zone proximity/touch alert to Telegram chat.
     Records alert in memory history for dashboard and API tracking.
+    Returns diagnostic dict with delivery status and Telegram API response.
     """
     text = format_zone_telegram_alert(alert_event, profile=profile)
 
@@ -635,8 +666,13 @@ async def dispatch_zone_telegram_alert(alert_event: ZoneAlertEvent, profile: Opt
         _recent_zone_alerts.pop()
 
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.info("[MOCK TELEGRAM] Zone Alert Triggered:\n%s", alert_event.message)
-        return False
+        logger.info("[MOCK TELEGRAM] Zone Alert Triggered (TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured):\n%s", alert_event.message)
+        return {
+            "success": False,
+            "status": "not_configured",
+            "detail": "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID environment variable is missing on this server instance.",
+            "http_code": None,
+        }
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
@@ -647,17 +683,68 @@ async def dispatch_zone_telegram_alert(alert_event: ZoneAlertEvent, profile: Opt
     }
 
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, json=payload)
             if resp.status_code == 200:
-                logger.info("Telegram Zone Alert dispatched: %s", alert_event.message[:60])
-                return True
-            else:
-                logger.warning("Telegram Zone dispatch returned status %d: %s", resp.status_code, resp.text)
-                return False
+                logger.info("Telegram Zone Alert dispatched successfully: %s", alert_event.message[:60])
+                return {
+                    "success": True,
+                    "status": "delivered",
+                    "detail": "Alert delivered successfully to Telegram chat.",
+                    "http_code": 200,
+                }
+            
+            resp_desc = resp.text
+            try:
+                resp_desc = resp.json().get("description", resp.text)
+            except Exception:
+                pass
+
+            # If Telegram rejects HTML entities (HTTP 400), automatically retry plain text fallback
+            if resp.status_code == 400 and "can't parse entities" in resp_desc.lower():
+                logger.warning("Telegram rejected HTML entities, retrying with plain text fallback...")
+                plain_text = re.sub(r"<[^>]+>", "", text)
+                fallback_payload = {
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": plain_text,
+                    "disable_web_page_preview": True,
+                }
+                retry_resp = await client.post(url, json=fallback_payload)
+                if retry_resp.status_code == 200:
+                    logger.info("Telegram Zone Alert delivered via plain-text fallback: %s", alert_event.message[:60])
+                    return {
+                        "success": True,
+                        "status": "delivered",
+                        "detail": "Alert delivered successfully to Telegram (via plain-text fallback).",
+                        "http_code": 200,
+                    }
+                else:
+                    try:
+                        retry_desc = retry_resp.json().get("description", retry_resp.text)
+                    except Exception:
+                        retry_desc = retry_resp.text
+                    return {
+                        "success": False,
+                        "status": "failed",
+                        "detail": f"Telegram API error {retry_resp.status_code}: {retry_desc}",
+                        "http_code": retry_resp.status_code,
+                    }
+
+            logger.warning("Telegram Zone dispatch returned status %d: %s", resp.status_code, resp_desc)
+            return {
+                "success": False,
+                "status": "failed",
+                "detail": f"Telegram API error {resp.status_code}: {resp_desc}",
+                "http_code": resp.status_code,
+            }
     except Exception as e:
         logger.error("Error dispatching Telegram Zone alert: %s", e)
-        return False
+        return {
+            "success": False,
+            "status": "failed",
+            "detail": f"Network exception: {str(e)}",
+            "http_code": None,
+        }
 
 def serialize_liquidity_profile(profile: LiquidityProfileResult) -> Dict[str, Any]:
     """Helper to convert LiquidityProfileResult to JSON-serializable dictionary."""
@@ -2109,6 +2196,13 @@ async def health_check():
         "openai_configured": bool(OPENAI_API_KEY),
         "openai_active_model": _active_openai_model or (OPENAI_CANDIDATE_MODELS[0] if OPENAI_CANDIDATE_MODELS else None),
         "telegram_configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
+        "telegram_bot_token_present": bool(TELEGRAM_BOT_TOKEN),
+        "telegram_chat_id_present": bool(TELEGRAM_CHAT_ID),
+        "telegram_chat_id_masked": (
+            (TELEGRAM_CHAT_ID[:3] + "..." + TELEGRAM_CHAT_ID[-3:])
+            if len(TELEGRAM_CHAT_ID) > 6
+            else (TELEGRAM_CHAT_ID if TELEGRAM_CHAT_ID else None)
+        ),
         "oanda_configured": bool(OANDA_API_KEY and OANDA_ACCOUNT_ID),
         "oanda_xauusd_price": poller_state.current_gold_price,
     }
@@ -2345,12 +2439,27 @@ async def trigger_test_zone_alert(event_type: str = "ENTERED"):
         message=f"[TEST ALERT] Price ${poller_state.current_gold_price:.2f} {ev_type} {target_zone.zone_type}",
     )
 
-    dispatched = await dispatch_zone_telegram_alert(test_event, profile=_latest_liquidity_profile)
+    dispatch_res = await dispatch_zone_telegram_alert(test_event, profile=_latest_liquidity_profile)
     formatted_html = format_zone_telegram_alert(test_event, profile=_latest_liquidity_profile)
 
+    telegram_configured = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+    bot_token_present = bool(TELEGRAM_BOT_TOKEN)
+    chat_id_present = bool(TELEGRAM_CHAT_ID)
+    chat_id_masked = (
+        (TELEGRAM_CHAT_ID[:3] + "..." + TELEGRAM_CHAT_ID[-3:])
+        if len(TELEGRAM_CHAT_ID) > 6
+        else (TELEGRAM_CHAT_ID if TELEGRAM_CHAT_ID else "NOT_SET")
+    )
+
     return {
-        "status": "dispatched" if dispatched else "logged_mock",
-        "telegram_configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
+        "status": dispatch_res.get("status", "logged_mock"),
+        "success": dispatch_res.get("success", False),
+        "detail": dispatch_res.get("detail", ""),
+        "http_code": dispatch_res.get("http_code"),
+        "telegram_configured": telegram_configured,
+        "bot_token_present": bot_token_present,
+        "chat_id_present": chat_id_present,
+        "chat_id_masked": chat_id_masked,
         "event": {
             "type": ev_type,
             "zone": target_zone.zone_type,

@@ -2094,16 +2094,154 @@
       setTimeout(() => { toast.remove(); }, 6000);
     }
 
+    function showTelegramDiagnosticModal(data) {
+      // Remove any existing modal
+      const existing = document.getElementById('telegram-diagnostic-modal');
+      if (existing) existing.remove();
+
+      const isSuccess = data.success === true || data.status === 'delivered';
+      const isNotConfigured = !data.telegram_configured || data.status === 'not_configured';
+
+      let statusBadge, headerColor, headerIcon, title, adviceHtml;
+
+      if (isSuccess) {
+        headerColor = 'border-emerald-500/40 bg-emerald-950/40 text-emerald-300';
+        headerIcon = '🎯';
+        title = 'Telegram Alert Delivered Successfully!';
+        statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">DELIVERED (HTTP 200)</span>';
+        adviceHtml = `
+          <div class="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-xs text-emerald-200/90 leading-relaxed">
+            <p class="font-semibold text-emerald-300 mb-1 flex items-center gap-1.5">
+              <span>🔔 Check your Telegram App now</span>
+            </p>
+            The test alert was transmitted to Telegram Chat <b>${data.chat_id_masked || 'your chat'}</b>. You should hear/see the notification on your phone or desktop Telegram client.
+          </div>
+        `;
+      } else if (isNotConfigured) {
+        headerColor = 'border-amber-500/40 bg-amber-950/40 text-amber-300';
+        headerIcon = '⚠️';
+        title = 'Telegram Credentials Missing on Server';
+        statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">SERVER: NOT CONFIGURED</span>';
+        adviceHtml = `
+          <div class="p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-200/90 leading-relaxed space-y-2">
+            <p class="font-semibold text-amber-300">Why did this happen?</p>
+            <p>The server instance running this dashboard did not find <code class="bg-black/40 px-1 py-0.5 rounded text-amber-200">TELEGRAM_BOT_TOKEN</code> or <code class="bg-black/40 px-1 py-0.5 rounded text-amber-200">TELEGRAM_CHAT_ID</code> in its active environment.</p>
+            <div class="mt-2 pt-2 border-t border-amber-500/20 text-[11px] space-y-1.5">
+              <p class="font-semibold text-amber-200">If you added the credentials in Render:</p>
+              <ul class="list-disc pl-4 space-y-1 text-amber-300/80">
+                <li>Check your Render dashboard: Did the service finish <b>Building &amp; Deploying</b>?</li>
+                <li>Whenever you change Environment Variables on Render, Render must perform a new deploy or restart to load them into the application process.</li>
+                <li>Go to Render Dashboard &rarr; <b>Manual Deploy</b> &rarr; <b>Deploy latest commit</b> to apply your variables immediately.</li>
+              </ul>
+              <p class="font-semibold text-amber-200 mt-2">If you are testing locally:</p>
+              <p class="text-amber-300/80">Add <code class="bg-black/40 px-1 py-0.5 rounded">TELEGRAM_BOT_TOKEN=...</code> and <code class="bg-black/40 px-1 py-0.5 rounded">TELEGRAM_CHAT_ID=...</code> to your local <code class="bg-black/40 px-1 py-0.5 rounded">.env</code> file and restart the local server.</p>
+            </div>
+          </div>
+        `;
+      } else {
+        headerColor = 'border-rose-500/40 bg-rose-950/40 text-rose-300';
+        headerIcon = '❌';
+        title = 'Telegram API Error / Delivery Blocked';
+        statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">${data.http_code ? 'HTTP ' + data.http_code : 'FAILED'}</span>`;
+        adviceHtml = `
+          <div class="p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/30 text-xs text-rose-200/90 leading-relaxed space-y-2">
+            <p class="font-semibold text-rose-300">Telegram API Response Details:</p>
+            <p class="font-mono text-xs bg-black/40 p-2 rounded border border-rose-500/20 text-rose-200 select-all">${data.detail || 'Telegram rejected the message.'}</p>
+            <div class="mt-2 pt-2 border-t border-rose-500/20 text-[11px] space-y-1.5">
+              <p class="font-semibold text-rose-200">Common fixes for this error:</p>
+              <ul class="list-disc pl-4 space-y-1 text-rose-300/80">
+                <li><b>"Chat not found" or "bot was blocked by user":</b> You must open your Telegram bot (search for your bot's username in Telegram) and press <b>/start</b>! Telegram strictly forbids bots from sending you messages until you interact with the bot first.</li>
+                <li><b>"Unauthorized (401)":</b> The <code class="bg-black/40 px-1 rounded text-rose-200">TELEGRAM_BOT_TOKEN</code> is invalid. Verify the exact token string given by @BotFather.</li>
+                <li><b>Incorrect Chat ID:</b> Send a message to <b>@userinfobot</b> in Telegram to get your exact numerical ID.</li>
+              </ul>
+            </div>
+          </div>
+        `;
+      }
+
+      const modal = document.createElement('div');
+      modal.id = 'telegram-diagnostic-modal';
+      modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in';
+      modal.innerHTML = `
+        <div class="relative w-full max-w-lg rounded-2xl bg-slate-900 border ${headerColor} shadow-2xl overflow-hidden animate-slide-in">
+          <!-- Header -->
+          <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <span class="text-xl">${headerIcon}</span>
+              <div>
+                <h3 class="font-bold text-sm text-slate-100">${title}</h3>
+                <div class="mt-0.5">${statusBadge}</div>
+              </div>
+            </div>
+            <button onclick="document.getElementById('telegram-diagnostic-modal').remove()" class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition">
+              <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+          </div>
+
+          <!-- Body -->
+          <div class="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+            <!-- Details Grid -->
+            <div class="grid grid-cols-2 gap-2 text-xs font-mono bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+              <div>
+                <span class="text-slate-400 text-[11px] block">Target Zone:</span>
+                <span class="text-slate-200 font-semibold">${data.event ? data.event.zone : '--'}</span>
+              </div>
+              <div>
+                <span class="text-slate-400 text-[11px] block">Gold Spot Price:</span>
+                <span class="text-amber-400 font-bold">$${data.event ? Number(data.event.price).toFixed(2) : '--'}</span>
+              </div>
+              <div class="mt-1">
+                <span class="text-slate-400 text-[11px] block">Bot Token Status:</span>
+                <span class="${data.bot_token_present ? 'text-emerald-400' : 'text-rose-400'} font-semibold">${data.bot_token_present ? 'Configured' : 'Missing'}</span>
+              </div>
+              <div class="mt-1">
+                <span class="text-slate-400 text-[11px] block">Target Chat ID:</span>
+                <span class="${data.chat_id_present ? 'text-emerald-400' : 'text-rose-400'} font-semibold">${data.chat_id_masked || 'Not Set'}</span>
+              </div>
+            </div>
+
+            <!-- Contextual Advice -->
+            ${adviceHtml}
+          </div>
+
+          <!-- Footer -->
+          <div class="px-5 py-3 bg-slate-950 border-t border-slate-800 flex justify-end">
+            <button onclick="document.getElementById('telegram-diagnostic-modal').remove()" class="px-4 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+              Close Diagnostic
+            </button>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(modal);
+      renderIcons();
+    }
+
     async function triggerTestTelegramAlert(eventType = 'ENTERED') {
       try {
+        const btn = document.querySelector("button[onclick*='triggerTestTelegramAlert']");
+        const originalHtml = btn ? btn.innerHTML : '';
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<span class="inline-block animate-spin mr-1">⏳</span> Dispatching...';
+        }
+
         const res = await fetch(`/api/liquidity/test-alert?event_type=${eventType}`, { method: 'POST' });
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalHtml;
+          renderIcons();
+        }
+
         if (res.ok) {
           const data = await res.json();
-          alert(`Test Alert Dispatched (${data.status})!\n\nZone: ${data.event.zone}\nPrice: $${data.event.price}\nTelegram Configured: ${data.telegram_configured ? 'YES' : 'NO (Logged to Server Console)'}`);
+          showTelegramDiagnosticModal(data);
           fetchLiquidityAlerts();
+        } else {
+          alert('HTTP ' + res.status + ' Error dispatching test alert.');
         }
       } catch (err) {
-        alert('Error dispatching test alert: ' + err.message);
+        alert('Network error dispatching test alert: ' + err.message);
       }
     }
 
