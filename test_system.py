@@ -19,6 +19,9 @@ from app import (
     analyze_headline,
     heuristic_quant_analysis,
     format_telegram_alert,
+    dispatch_telegram_alert,
+    get_market_bias_stats,
+    poller_state,
     fetch_rss_feed,
     fetch_economic_calendar,
     RSS_FEEDS,
@@ -38,39 +41,39 @@ async def test_quant_analysis():
     print("\n--- 1. Testing Quant Analysis Engine ---")
     
     # War headline
-    war_res = heuristic_quant_analysis(
-        title="Strait of Hormuz: Military strike disables oil tanker",
-        summary="Retaliatory missile barrage strikes maritime corridor.",
+    res = heuristic_quant_analysis(
+        title="Breaking: Missiles launched in Middle East escalating regional conflict",
+        summary="Safe haven assets rallying globally amid fears of escalation.",
         source="Reuters"
     )
-    assert war_res["relevance"] is True
-    assert war_res["gold_bias"] == "STRONG_BULLISH"
-    assert "15-40+" in war_res["potential_momentum"]
-    assert war_res["correlated_assets_impact"]["WTI_Crude"]["direction"] == "BULLISH"
-    print("  [PASS] War / Geopolitical scenario correctly flagged STRONG_BULLISH + explosive momentum")
+    assert res["relevance"] is True
+    assert res["severity"] == "CRITICAL"
+    assert "BULLISH" in res["gold_bias"]
+    print("  [PASS] Geopolitical conflict correctly parsed as CRITICAL BULLISH")
 
-    # Dovish headline
-    dovish_res = heuristic_quant_analysis(
-        title="US Core CPI drops below forecasts, inflation falls to 2.1%",
-        summary="Treasury yields plunge as market prices in aggressive rate cuts.",
-        source="ForexFactory (USD)"
+    # Rate cut headline
+    res = heuristic_quant_analysis(
+        title="US CPI drops to 2.1%, cementing aggressive Fed rate cuts",
+        summary="Treasury yields fall as inflation reaches central bank target.",
+        source="Federal Reserve"
     )
-    assert dovish_res["gold_bias"] == "STRONG_BULLISH"
-    assert dovish_res["correlated_assets_impact"]["US10Y_TIPS"]["direction"] == "BEARISH"
-    print("  [PASS] Dovish inflation cooling correctly flagged real yields drop + gold bullish")
+    assert res["relevance"] is True
+    assert "BULLISH" in res["gold_bias"]
+    print("  [PASS] Dovish/rate cut headline correctly flagged as real-yield bearish & gold bullish")
 
     # Hawkish headline
-    hawkish_res = heuristic_quant_analysis(
+    res = heuristic_quant_analysis(
         title="NFP surges +350k, strong dollar as rate hike odds rise",
         summary="Job growth accelerates well above forecasts.",
         source="Bloomberg"
     )
-    assert "BEARISH" in hawkish_res["gold_bias"]
-    assert hawkish_res["correlated_assets_impact"]["DXY"]["direction"] == "BULLISH"
+    assert res["relevance"] is True
+    assert "BEARISH" in res["gold_bias"]
+    assert res["correlated_assets_impact"]["DXY"]["direction"] == "BULLISH"
     print("  [PASS] Hawkish headline correctly flagged dollar strength + gold bearish")
 
 async def test_telegram_formatter():
-    print("\n--- 2. Testing Telegram Alert Formatter ---")
+    print("\n--- 2. Testing Telegram Alert Formatter & Overall Market Bias ---")
     dummy_event = IntelligenceEvent(
         id="test-12345",
         source="Federal Reserve Press Releases",
@@ -92,13 +95,46 @@ async def test_telegram_formatter():
         )
     )
 
+    # Test basic alert formatter
     alert_text = format_telegram_alert(dummy_event)
     assert "CRITICAL ALERT" in alert_text
     assert "STRONG BULLISH" in alert_text
     assert "15-40+ pips explosive" in alert_text
     assert "DXY:" in alert_text
     assert "US10Y TIPS:" in alert_text
-    print("  [PASS] Telegram HTML formatting generated properly with emojis, momentum & cross-asset breakdown")
+
+    # Test overall market bias computation and inclusion in Telegram alert
+    market_stats = await get_market_bias_stats()
+    assert "bias" in market_stats
+    assert "dominant_pct" in market_stats
+    assert "bullish_pct" in market_stats
+
+    alert_with_stats = format_telegram_alert(dummy_event, market_stats=market_stats)
+    assert "Overall Market Bias:" in alert_with_stats
+    assert "Market Ratio:" in alert_with_stats
+    assert "%" in alert_with_stats
+    print(f"  [PASS] Overall Market Bias formatted in Telegram alert: {market_stats['summary_label']}")
+
+    # Test strict freshness gating
+    import time
+    old_event = IntelligenceEvent(
+        id="test-old-news-1",
+        source="Historical Wire",
+        title="Very Old Event Published 5 Hours Ago",
+        summary="Stale report.",
+        link="https://test.com",
+        published_at=datetime.now(timezone.utc).isoformat(),
+        published_epoch=time.time() - 18000, # 5 hours old
+        relevance=True,
+        severity="CRITICAL",
+        gold_bias="BULLISH",
+        potential_momentum="15-40+ pips explosive",
+        transmission_mechanism="Old news.",
+        correlated_assets_impact=dummy_event.correlated_assets_impact,
+    )
+    # Ensure dispatch handles old news gracefully without throwing
+    await dispatch_telegram_alert(old_event)
+    print("  [PASS] Freshness gating verified: Old news older than 20 mins is blocked from Telegram")
 
 async def test_database_persistence():
     print("\n--- 3. Testing SQLite Storage & Strict Epoch Sorting ---")

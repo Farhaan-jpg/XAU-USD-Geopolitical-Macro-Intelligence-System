@@ -154,6 +154,7 @@ class IntelligenceEvent(BaseModel):
     published_at: str
     published_epoch: float = Field(default_factory=lambda: time.time())
     is_upcoming: bool = False
+    is_simulated: bool = False
     relevance: bool = True
     severity: str = Field(..., description="CRITICAL | HIGH | MEDIUM | LOW")
     gold_bias: str = Field(..., description="STRONG_BULLISH | BULLISH | NEUTRAL | BEARISH | STRONG_BEARISH")
@@ -326,11 +327,77 @@ async def is_event_processed(event_id: str) -> bool:
             return row is not None
 
 # ---------------------------------------------------------------------------
-# Telegram Bot Dispatcher
+# Telegram Bot Dispatcher & Macro Bias Aggregator
 # ---------------------------------------------------------------------------
 
-def format_telegram_alert(event: IntelligenceEvent) -> str:
-    """Formats event into a high-visibility, crisp HTML alert for Telegram."""
+_telegram_sent_event_ids: Set[str] = set()
+
+async def get_market_bias_stats() -> Dict[str, Any]:
+    """
+    Computes real-time overall macroeconomic sentiment bias and percentages
+    across recently stored intelligence events in the SQLite database.
+    """
+    try:
+        events = await get_recent_events(limit=50)
+    except Exception as e:
+        logger.debug("Error fetching recent events for market bias stats: %s", e)
+        events = []
+
+    total = len(events)
+    if total == 0:
+        return {
+            "bias": "NEUTRAL",
+            "emoji": "⚪",
+            "bullish_pct": 50.0,
+            "bearish_pct": 50.0,
+            "neutral_pct": 0.0,
+            "dominant_pct": 50.0,
+            "total_events": 0,
+            "summary_label": "NEUTRAL (50.0%)",
+        }
+
+    bullish = sum(1 for e in events if "BULLISH" in e.get("gold_bias", ""))
+    bearish = sum(1 for e in events if "BEARISH" in e.get("gold_bias", ""))
+    neutral = sum(1 for e in events if e.get("gold_bias") == "NEUTRAL")
+
+    bullish_pct = round((bullish / total) * 100, 1)
+    bearish_pct = round((bearish / total) * 100, 1)
+    neutral_pct = round((neutral / total) * 100, 1)
+
+    if bullish_pct >= 65.0:
+        bias = "STRONG BULLISH"
+        emoji = "🟢🟢"
+        dominant_pct = bullish_pct
+    elif bullish_pct >= 52.0:
+        bias = "BULLISH"
+        emoji = "🟢"
+        dominant_pct = bullish_pct
+    elif bearish_pct >= 65.0:
+        bias = "STRONG BEARISH"
+        emoji = "🔴🔴"
+        dominant_pct = bearish_pct
+    elif bearish_pct >= 52.0:
+        bias = "BEARISH"
+        emoji = "🔴"
+        dominant_pct = bearish_pct
+    else:
+        bias = "NEUTRAL / BALANCED"
+        emoji = "⚪"
+        dominant_pct = max(bullish_pct, bearish_pct, neutral_pct)
+
+    return {
+        "bias": bias,
+        "emoji": emoji,
+        "bullish_pct": bullish_pct,
+        "bearish_pct": bearish_pct,
+        "neutral_pct": neutral_pct,
+        "dominant_pct": dominant_pct,
+        "total_events": total,
+        "summary_label": f"{bias} ({dominant_pct}%)",
+    }
+
+def format_telegram_alert(event: IntelligenceEvent, market_stats: Optional[Dict[str, Any]] = None) -> str:
+    """Formats event into a high-visibility, crisp HTML alert for Telegram with overall market bias & percentage."""
     bias_emoji = {
         "STRONG_BULLISH": "🟢🟢 <b>STRONG BULLISH</b>",
         "BULLISH": "🟢 <b>BULLISH</b>",
@@ -342,8 +409,8 @@ def format_telegram_alert(event: IntelligenceEvent) -> str:
     severity_badge = {
         "CRITICAL": "🚨 [CRITICAL ALERT]",
         "HIGH": "🔥 [HIGH IMPACT]",
-        "MEDIUM": "⚡ [MEDIUM]",
-        "LOW": "ℹ️ [LOW]",
+        "MEDIUM": "⚡ [MEDIUM IMPACT]",
+        "LOW": "ℹ️ [LOW IMPACT]",
     }.get(event.severity, event.severity)
 
     corr = event.correlated_assets_impact
@@ -353,10 +420,27 @@ def format_telegram_alert(event: IntelligenceEvent) -> str:
     silver_dir = f"{'🟢' if corr.Silver_XAG.direction == 'BULLISH' else '🔴' if corr.Silver_XAG.direction == 'BEARISH' else '⚪'} {corr.Silver_XAG.direction}"
     vix_dir = f"{'🟢' if corr.VIX.direction == 'BULLISH' else '🔴' if corr.VIX.direction == 'BEARISH' else '⚪'} {corr.VIX.direction}"
 
+    # Overall Market Bias calculation & presentation
+    if market_stats:
+        m_bias = market_stats.get("bias", "NEUTRAL")
+        m_emoji = market_stats.get("emoji", "⚪")
+        m_dom = market_stats.get("dominant_pct", 50.0)
+        m_bull = market_stats.get("bullish_pct", 50.0)
+        m_bear = market_stats.get("bearish_pct", 50.0)
+        m_neu = market_stats.get("neutral_pct", 0.0)
+        m_total = market_stats.get("total_events", 0)
+        market_bias_section = (
+            f"🌐 <b>Overall Market Bias:</b> {m_emoji} <b>{m_bias} ({m_dom}%)</b>\n"
+            f"📊 <i>Market Ratio: {m_bull}% Bullish | {m_bear}% Bearish | {m_neu}% Neutral ({m_total} events analyzed)</i>\n\n"
+        )
+    else:
+        market_bias_section = ""
+
     return (
         f"<b>{severity_badge}</b>\n"
-        f"🏆 <b>XAU/USD Gold Bias:</b> {bias_emoji}\n"
+        f"🏆 <b>Event Gold Bias:</b> {bias_emoji}\n"
         f"⚡ <b>Expected Momentum:</b> <code>{event.potential_momentum}</code>\n\n"
+        f"{market_bias_section}"
         f"📰 <b>Headline:</b> {event.title}\n"
         f"📡 <b>Source:</b> {event.source}\n\n"
         f"🎯 <b>Transmission Mechanism:</b>\n"
@@ -371,18 +455,57 @@ def format_telegram_alert(event: IntelligenceEvent) -> str:
     )
 
 async def dispatch_telegram_alert(event: IntelligenceEvent):
-    """Dispatches alert to configured Telegram chat asynchronously."""
+    """
+    Dispatches alert to configured Telegram chat asynchronously.
+    STRICT FILTER: ONLY sends current news and events (no historical backfill or stale news).
+    Includes Overall Market Bias with exact percentage.
+    """
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
 
-    # Notify on all events if TELEGRAM_NOTIFY_ALL_EVENTS is True (default)
+    # Deduplication guard to avoid repeat dispatches
+    if event.id in _telegram_sent_event_ids:
+        logger.debug("Telegram alert already sent for event %s, skipping.", event.id)
+        return
+
+    is_simulated = getattr(event, "is_simulated", False) or "Simulated" in event.source
+    now = time.time()
+
+    # 1. Guard against initial boot backfill spam:
+    # If initial boot seeding is still running, suppress Telegram alerts for historical backlog.
+    if not poller_state.initial_seed_completed and not is_simulated:
+        logger.info("Telegram alert suppressed during initial boot seeding: %s", event.title[:45])
+        return
+
+    # 2. Strict Freshness Gate: ONLY current news and events!
+    pub_epoch = float(event.published_epoch or 0.0)
+    age_seconds = now - pub_epoch
+
+    if not is_simulated:
+        if event.is_upcoming:
+            # For upcoming economic calendar events, only notify if occurring within the next 30 minutes
+            time_until_event = pub_epoch - now
+            if time_until_event < -600 or time_until_event > 1800:
+                logger.info("Telegram alert skipped for upcoming calendar event outside immediate window (%.1f mins away): %s", time_until_event / 60, event.title[:45])
+                return
+        else:
+            # For news and past events, strictly reject anything older than 20 minutes (1200 seconds)
+            if age_seconds > 1200:
+                logger.info("Telegram alert skipped for old news (age: %.1f mins): %s", age_seconds / 60, event.title[:45])
+                return
+
+    # 3. Severity filter if TELEGRAM_NOTIFY_ALL_EVENTS is False
     if not TELEGRAM_NOTIFY_ALL_EVENTS and event.severity not in ["CRITICAL", "HIGH"]:
         return
+
+    # 4. Fetch real-time overall market bias & percentage
+    stats = await get_market_bias_stats()
+    text = format_telegram_alert(event, market_stats=stats)
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": format_telegram_alert(event),
+        "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": False,
     }
@@ -391,6 +514,7 @@ async def dispatch_telegram_alert(event: IntelligenceEvent):
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, json=payload)
             if resp.status_code == 200:
+                _telegram_sent_event_ids.add(event.id)
                 logger.info("Telegram alert dispatched successfully for %s", event.id)
             else:
                 logger.warning("Telegram dispatch returned status %d: %s", resp.status_code, resp.text)
@@ -1360,6 +1484,8 @@ class PollerStatus:
         self.ask: float = 4433.70
         self.spread: float = 0.50
         self.change_pct: float = 0.62
+        self.initial_seed_completed: bool = False
+        self.boot_time: float = time.time()
 
 poller_state = PollerStatus()
 
@@ -1396,6 +1522,7 @@ async def process_raw_item(raw: Dict[str, Any]) -> Optional[IntelligenceEvent]:
         published_at=raw.get("published_at", datetime.now(timezone.utc).isoformat()),
         published_epoch=float(raw.get("published_epoch") or time.time()),
         is_upcoming=bool(raw.get("is_upcoming", False)),
+        is_simulated=bool(raw.get("is_simulated", False)),
         relevance=True,
         severity=analysis.get("severity", "LOW"),
         gold_bias=analysis.get("gold_bias", "NEUTRAL"),
@@ -1407,7 +1534,7 @@ async def process_raw_item(raw: Dict[str, Any]) -> Optional[IntelligenceEvent]:
     # 1. Store in SQLite
     await store_event(event)
 
-    # 2. Dispatch Telegram alert if high/critical
+    # 2. Dispatch Telegram alert (Strictly filtered for current events only)
     await dispatch_telegram_alert(event)
 
     # 3. Real-Time Broadcast to WebSockets and SSE simultaneously
@@ -1457,6 +1584,9 @@ async def background_poller_task():
         await run_poll_cycle()
     except Exception as e:
         logger.error("Initial poll cycle failed: %s", e)
+    finally:
+        poller_state.initial_seed_completed = True
+        logger.info("Initial boot seeding complete. Telegram live alerts are now ACTIVE for fresh breaking events.")
 
     while poller_state.poller_active:
         try:
@@ -1609,23 +1739,24 @@ async def get_calendar():
 
 @app.get("/api/stats")
 async def get_stats():
-    """Computes real-time macroeconomic sentiment statistics."""
+    """Computes real-time macroeconomic sentiment statistics and overall market bias."""
+    market_stats = await get_market_bias_stats()
     events = await get_recent_events(limit=50)
-    total = len(events)
-    bullish = sum(1 for e in events if "BULLISH" in e.get("gold_bias", ""))
-    bearish = sum(1 for e in events if "BEARISH" in e.get("gold_bias", ""))
-    neutral = sum(1 for e in events if e.get("gold_bias") == "NEUTRAL")
     critical = sum(1 for e in events if e.get("severity") in ["CRITICAL", "HIGH"])
 
-    bullish_pct = round((bullish / total * 100) if total > 0 else 50, 1)
-
     return {
-        "total_events": total,
-        "bullish_count": bullish,
-        "bearish_count": bearish,
-        "neutral_count": neutral,
+        "total_events": market_stats["total_events"],
+        "bullish_count": sum(1 for e in events if "BULLISH" in e.get("gold_bias", "")),
+        "bearish_count": sum(1 for e in events if "BEARISH" in e.get("gold_bias", "")),
+        "neutral_count": sum(1 for e in events if e.get("gold_bias") == "NEUTRAL"),
         "critical_count": critical,
-        "bullish_percentage": bullish_pct,
+        "bullish_percentage": market_stats["bullish_pct"],
+        "bearish_percentage": market_stats["bearish_pct"],
+        "neutral_percentage": market_stats["neutral_pct"],
+        "dominant_percentage": market_stats["dominant_pct"],
+        "overall_market_bias": market_stats["bias"],
+        "overall_bias_emoji": market_stats["emoji"],
+        "overall_bias_label": market_stats["summary_label"],
         "last_poll_time": poller_state.last_poll_time,
         "poll_interval_seconds": POLL_INTERVAL_SECONDS,
         "current_gold_price": poller_state.current_gold_price,
@@ -1657,6 +1788,7 @@ async def simulate_event(req: SimulateRequest):
         "link": req.link or "https://bloomberg.com/terminal/simulated",
         "published_at": now_iso,
         "published_epoch": time.time(),
+        "is_simulated": True,
     }
 
     event = await process_raw_item(raw_item)

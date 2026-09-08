@@ -184,6 +184,10 @@
           <span id="ticker-delta-pill" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
             ▲ +0.62%
           </span>
+          <div id="header-market-bias-badge" class="hidden xl:flex items-center gap-1.5 text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold ml-1" title="Real-time Quantitative Macro Sentiment Regime">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="header-bias-label">BIAS: BULLISH (50.0%)</span>
+          </div>
         </div>
 
         <div class="hidden sm:flex items-center gap-3 text-[11px] font-mono border-l border-zinc-800 pl-3 text-zinc-400">
@@ -239,20 +243,23 @@
       <!-- Card 1: Sentiment Dominance -->
       <div class="glass-card p-4 rounded-xl flex flex-col justify-between">
         <div class="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1">
-          <span>GOLD SENTIMENT BIAS</span>
+          <span>OVERALL MARKET BIAS</span>
           <i data-lucide="compass" class="w-4 h-4 text-gold-accent"></i>
         </div>
-        <div class="flex items-baseline gap-2 my-1">
-          <span id="stat-bullish-pct" class="text-2xl font-bold font-mono text-emerald-400">50.0%</span>
-          <span class="text-xs text-zinc-400">Bullish Ratio</span>
+        <div class="flex items-center justify-between gap-2 my-1">
+          <div class="flex items-baseline gap-2">
+            <span id="stat-bullish-pct" class="text-2xl font-bold font-mono text-emerald-400">50.0%</span>
+            <span class="text-xs text-zinc-400">Bullish Ratio</span>
+          </div>
+          <span id="stat-market-bias-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">BULLISH (50.0%)</span>
         </div>
         <div class="w-full bg-zinc-800 h-2 rounded-full overflow-hidden flex">
           <div id="sentiment-bar-bullish" class="bg-emerald-500 h-full transition-all duration-300" style="width: 50%"></div>
           <div id="sentiment-bar-bearish" class="bg-rose-500 h-full transition-all duration-300" style="width: 50%"></div>
         </div>
         <div class="flex justify-between text-[10px] font-mono text-zinc-400 mt-1.5">
-          <span id="stat-bullish-count">0 Bullish</span>
-          <span id="stat-bearish-count">0 Bearish</span>
+          <span id="stat-bullish-count">0 Bullish (50%)</span>
+          <span id="stat-bearish-count">0 Bearish (50%)</span>
         </div>
       </div>
 
@@ -715,12 +722,44 @@
       const bearish = allEvents.filter(e => (e.gold_bias || '').includes('BEARISH')).length;
       const critical = allEvents.filter(e => e.severity === 'CRITICAL' || e.severity === 'HIGH').length;
       const pct = Math.round((bullish / total) * 100);
+      const bearishPct = Math.round((bearish / total) * 100);
+
+      let biasText = `NEUTRAL (${pct}%)`;
+      let biasBadgeClass = "bg-amber-500/15 text-amber-300 border-amber-500/30";
+
+      if (pct >= 65) {
+        biasText = `STRONG BULLISH (${pct}%)`;
+        biasBadgeClass = "bg-emerald-500/20 text-emerald-400 border-emerald-500/40";
+      } else if (pct >= 52) {
+        biasText = `BULLISH (${pct}%)`;
+        biasBadgeClass = "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+      } else if (bearishPct >= 65) {
+        biasText = `STRONG BEARISH (${bearishPct}%)`;
+        biasBadgeClass = "bg-rose-500/20 text-rose-400 border-rose-500/40";
+      } else if (bearishPct >= 52) {
+        biasText = `BEARISH (${bearishPct}%)`;
+        biasBadgeClass = "bg-rose-500/15 text-rose-400 border-rose-500/30";
+      } else {
+        biasText = `NEUTRAL (${pct}%)`;
+        biasBadgeClass = "bg-amber-500/15 text-amber-300 border-amber-500/30";
+      }
+
+      const badgeEl = document.getElementById('stat-market-bias-badge');
+      if (badgeEl) {
+        badgeEl.textContent = biasText;
+        badgeEl.className = `px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono border ${biasBadgeClass}`;
+      }
+
+      const headerBiasEl = document.getElementById('header-bias-label');
+      if (headerBiasEl) {
+        headerBiasEl.textContent = `BIAS: ${biasText}`;
+      }
 
       document.getElementById('stat-bullish-pct').textContent = `${pct}%`;
       document.getElementById('sentiment-bar-bullish').style.width = `${pct}%`;
       document.getElementById('sentiment-bar-bearish').style.width = `${100 - pct}%`;
-      document.getElementById('stat-bullish-count').textContent = `${bullish} Bullish`;
-      document.getElementById('stat-bearish-count').textContent = `${bearish} Bearish`;
+      document.getElementById('stat-bullish-count').textContent = `${bullish} Bullish (${pct}%)`;
+      document.getElementById('stat-bearish-count').textContent = `${bearish} Bearish (${bearishPct}%)`;
       document.getElementById('stat-critical-count').textContent = critical;
       document.getElementById('stat-total-processed').textContent = total;
     }
