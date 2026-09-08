@@ -26,6 +26,19 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from liquidity_engine import (
+    fetch_ohlcv_bars,
+    LiquidityEngine,
+    ZoneRadar,
+    LiquidityProfileResult,
+    ZoneAlertEvent,
+    CandleBar,
+    LiquidityZone,
+    DEFAULT_LOOKBACK,
+    DEFAULT_BINS,
+    DEFAULT_PROXIMITY_BUFFER_USD,
+)
+
 # Load environment variables
 load_dotenv()
 
@@ -535,6 +548,180 @@ async def dispatch_telegram_alert(event: IntelligenceEvent):
                 logger.warning("Telegram dispatch returned status %d: %s", resp.status_code, resp.text)
     except Exception as e:
         logger.error("Error dispatching Telegram alert: %s", e)
+
+# ---------------------------------------------------------------------------
+# Dynamic Liquidity HeatMap Profile & Telegram Zone Alerts
+# ---------------------------------------------------------------------------
+
+liquidity_engine = LiquidityEngine(lookback=DEFAULT_LOOKBACK, bins=DEFAULT_BINS)
+zone_radar = ZoneRadar(proximity_buffer_usd=DEFAULT_PROXIMITY_BUFFER_USD)
+_latest_liquidity_profile: Optional[LiquidityProfileResult] = None
+_recent_zone_alerts: List[Dict[str, Any]] = []
+_liquidity_lock = asyncio.Lock()
+
+def format_zone_telegram_alert(alert_event: ZoneAlertEvent, profile: Optional[LiquidityProfileResult] = None) -> str:
+    """Formats a zone proximity/touch event into a high-visibility, professional Telegram alert."""
+    zone = alert_event.zone
+    is_entered = alert_event.event_type == "ENTERED"
+    
+    if is_entered:
+        header_badge = "🎯 <b>[ZONE REACHED / TOUCHED] XAU/USD ALERT</b>"
+        status_line = f"📍 <b>Price Action:</b> Price reached <b>${alert_event.current_price:.2f}</b> INSIDE the zone!"
+    else:
+        header_badge = "⚠️ <b>[PRICE NEARING ZONE] XAU/USD PROXIMITY</b>"
+        status_line = f"📍 <b>Price Action:</b> Price is at <b>${alert_event.current_price:.2f}</b> (only <b>${alert_event.distance:.2f}</b> away from zone boundary)!"
+
+    signal_badge = {
+        "BUY": "🟢 <b>PRO CONTINUATION BUY / LONG</b>",
+        "SELL": "🔴 <b>PRO CONTINUATION SELL / SHORT</b>",
+        "REVERSAL_BUY": "🟠 <b>COUNTER-TREND REVERSAL (LONG BOUNCE)</b>",
+        "REVERSAL_SELL": "🟠 <b>COUNTER-TREND REVERSAL (SHORT REJECTION)</b>",
+        "RANGE_BUY": "🔵 <b>RANGE SUPPORT BOUNCE</b>",
+        "RANGE_SELL": "🔵 <b>RANGE RESISTANCE REJECTION</b>",
+    }.get(zone.signal, f"⚡ <b>{zone.signal}</b>")
+
+    apex_tag = " 🌟 <b>[APEX ZONE - MAXIMUM LIQUIDITY]</b>" if zone.is_apex else ""
+    zone_category = "MAJOR APEX/MACRO ZONE" if zone.is_major else "HIGH-QUALITY PULLBACK ZONE"
+
+    trend_info = ""
+    if profile:
+        trend_info = (
+            f"• <b>Dual-MA Trend Context:</b> {profile.trend_label}\n"
+            f"• <b>Fast EMA (50):</b> ${profile.fast_ma:.2f} | <b>Slow EMA (200):</b> ${profile.slow_ma:.2f}\n"
+            f"• <b>Point of Control (POC):</b> ${profile.poc_price:.2f} (Peak Vol: {profile.poc_volume:.1f})\n"
+            f"• <b>ATR(5) Volatility:</b> ${profile.atr:.2f}"
+        )
+
+    sl_direction = "below zone lower bound" if zone.is_lower else "above zone upper bound"
+
+    return (
+        f"{header_badge}\n\n"
+        f"🏆 <b>Symbol:</b> <code>XAU/USD (Spot Gold)</code>\n"
+        f"🏷 <b>Zone Type:</b> <b>{zone.zone_type}</b>{apex_tag}\n"
+        f"📊 <b>Category:</b> <code>{zone_category}</code>\n"
+        f"🎯 <b>Actionable Signal:</b> {signal_badge}\n\n"
+        f"{status_line}\n"
+        f"📐 <b>Zone Range:</b> <code>${zone.lower:.2f} – ${zone.upper:.2f}</code> (Mid: <code>${zone.mid:.2f}</code>)\n"
+        f"🛡 <b>Pine Script Stop Loss (SL):</b> <code>${zone.sl_price:.2f}</code> ({sl_direction})\n"
+        f"💧 <b>Liquidity Concentration:</b> <code>{zone.volume_pct:.1f}%</code> of peak profile volume (Bin #{zone.bin_index})\n\n"
+        f"🌐 <b>Market Condition Filters:</b>\n"
+        f"{trend_info}\n\n"
+        f"💡 <b>Tactical Advisory:</b> "
+        f"<i>{'Watch for strong buyer defense and confirmation rejection wicks inside this support zone.' if zone.is_lower else 'Watch for seller exhaustion and rejection off this overhead resistance block.'}</i>\n"
+        f"⏱ <i>{alert_event.timestamp}</i>"
+    )
+
+async def dispatch_zone_telegram_alert(alert_event: ZoneAlertEvent, profile: Optional[LiquidityProfileResult] = None) -> bool:
+    """
+    Dispatches liquidity zone proximity/touch alert to Telegram chat.
+    Records alert in memory history for dashboard and API tracking.
+    """
+    text = format_zone_telegram_alert(alert_event, profile=profile)
+
+    alert_record = {
+        "event_type": alert_event.event_type,
+        "zone_id": alert_event.zone.id,
+        "zone_type": alert_event.zone.zone_type,
+        "current_price": alert_event.current_price,
+        "distance": alert_event.distance,
+        "range": f"${alert_event.zone.lower:.2f} - ${alert_event.zone.upper:.2f}",
+        "sl_price": alert_event.zone.sl_price,
+        "signal": alert_event.zone.signal,
+        "timestamp": alert_event.timestamp,
+        "message": alert_event.message,
+    }
+    _recent_zone_alerts.insert(0, alert_record)
+    if len(_recent_zone_alerts) > 100:
+        _recent_zone_alerts.pop()
+
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.info("[MOCK TELEGRAM] Zone Alert Triggered:\n%s", alert_event.message)
+        return False
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code == 200:
+                logger.info("Telegram Zone Alert dispatched: %s", alert_event.message[:60])
+                return True
+            else:
+                logger.warning("Telegram Zone dispatch returned status %d: %s", resp.status_code, resp.text)
+                return False
+    except Exception as e:
+        logger.error("Error dispatching Telegram Zone alert: %s", e)
+        return False
+
+def serialize_liquidity_profile(profile: LiquidityProfileResult) -> Dict[str, Any]:
+    """Helper to convert LiquidityProfileResult to JSON-serializable dictionary."""
+    return {
+        "timestamp": profile.timestamp,
+        "symbol": profile.symbol,
+        "current_price": profile.current_price,
+        "lookback": profile.lookback,
+        "bins_count": profile.bins_count,
+        "trend_state": profile.trend_state,
+        "trend_label": profile.trend_label,
+        "fast_ma": profile.fast_ma,
+        "slow_ma": profile.slow_ma,
+        "atr": profile.atr,
+        "top_boundary": profile.top_boundary,
+        "bot_boundary": profile.bot_boundary,
+        "poc_price": profile.poc_price,
+        "poc_volume": profile.poc_volume,
+        "apex_zone": vars(profile.apex_zone) if profile.apex_zone else None,
+        "major_zones": [vars(z) for z in profile.major_zones],
+        "pullback_zones": [vars(z) for z in profile.pullback_zones],
+        "all_active_zones": [vars(z) for z in profile.all_active_zones],
+        "heatmap_bins": [vars(b) for b in profile.heatmap_bins],
+        "nearest_support": vars(profile.nearest_support) if profile.nearest_support else None,
+        "nearest_resistance": vars(profile.nearest_resistance) if profile.nearest_resistance else None,
+        "distance_to_nearest_support": profile.distance_to_nearest_support,
+        "distance_to_nearest_resistance": profile.distance_to_nearest_resistance,
+    }
+
+async def refresh_liquidity_profile():
+    """Fetches latest candle bars and recomputes the 300-bar liquidity heatmap profile."""
+    global _latest_liquidity_profile
+    try:
+        current_price = poller_state.current_gold_price
+        bars = await fetch_ohlcv_bars(
+            lookback=DEFAULT_LOOKBACK,
+            timeframe="15m",
+            oanda_api_key=OANDA_API_KEY,
+            oanda_account_id=OANDA_ACCOUNT_ID,
+            oanda_env=OANDA_ENVIRONMENT,
+            current_spot_price=current_price,
+        )
+        if bars:
+            async with _liquidity_lock:
+                profile = liquidity_engine.compute(bars, current_spot_price=current_price)
+                _latest_liquidity_profile = profile
+            logger.info("Liquidity HeatMap Profile updated: POC=$%.2f, Zones=%d, Trend=%s",
+                        profile.poc_price, len(profile.all_active_zones), profile.trend_label)
+            await hub.broadcast("liquidity_profile", serialize_liquidity_profile(profile))
+    except Exception as e:
+        logger.warning("Error refreshing liquidity profile: %s", e)
+
+async def periodic_liquidity_profile_updater_task():
+    """Background task refreshing the liquidity heatmap profile every 60 seconds."""
+    await asyncio.sleep(2.0)
+    while poller_state.poller_active:
+        try:
+            await refresh_liquidity_profile()
+            await asyncio.sleep(60.0)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug("Error in liquidity profile periodic updater: %s", e)
+            await asyncio.sleep(15.0)
 
 # ---------------------------------------------------------------------------
 # Quantitative LLM Parsing Engine
@@ -1795,6 +1982,51 @@ async def live_price_ticker_task():
                 "timestamp": datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
             }
             await hub.broadcast("price_tick", tick_payload)
+
+            # Evaluate Zone Proximity & Dispatch Telegram Alerts
+            if _latest_liquidity_profile:
+                triggered_events = zone_radar.evaluate_price(quote["price"], _latest_liquidity_profile)
+                for alert_ev in triggered_events:
+                    asyncio.create_task(dispatch_zone_telegram_alert(alert_ev, _latest_liquidity_profile))
+                    await hub.broadcast("zone_alert", {
+                        "event_type": alert_ev.event_type,
+                        "zone_id": alert_ev.zone.id,
+                        "zone_type": alert_ev.zone.zone_type,
+                        "current_price": alert_ev.current_price,
+                        "distance": alert_ev.distance,
+                        "range": f"${alert_ev.zone.lower:.2f} - ${alert_ev.zone.upper:.2f}",
+                        "sl_price": alert_ev.zone.sl_price,
+                        "signal": alert_ev.zone.signal,
+                        "timestamp": alert_ev.timestamp,
+                        "message": alert_ev.message,
+                    })
+
+                # Broadcast real-time zone radar update
+                sup = _latest_liquidity_profile.nearest_support
+                res = _latest_liquidity_profile.nearest_resistance
+                dist_sup = round(abs(quote["price"] - sup.upper), 2) if sup else None
+                dist_res = round(abs(res.lower - quote["price"]), 2) if res else None
+
+                await hub.broadcast("liquidity_tick", {
+                    "price": quote["price"],
+                    "trend_state": _latest_liquidity_profile.trend_state,
+                    "trend_label": _latest_liquidity_profile.trend_label,
+                    "poc_price": _latest_liquidity_profile.poc_price,
+                    "nearest_support": {
+                        "zone_type": sup.zone_type,
+                        "range": f"${sup.lower:.2f} - ${sup.upper:.2f}",
+                        "distance": dist_sup,
+                        "is_nearing": bool(dist_sup is not None and dist_sup <= zone_radar.proximity_buffer_usd),
+                        "is_inside": bool(sup.lower <= quote["price"] <= sup.upper) if sup else False,
+                    } if sup else None,
+                    "nearest_resistance": {
+                        "zone_type": res.zone_type,
+                        "range": f"${res.lower:.2f} - ${res.upper:.2f}",
+                        "distance": dist_res,
+                        "is_nearing": bool(dist_res is not None and dist_res <= zone_radar.proximity_buffer_usd),
+                        "is_inside": bool(res.lower <= quote["price"] <= res.upper) if res else False,
+                    } if res else None,
+                })
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -1810,12 +2042,14 @@ async def lifespan(app: FastAPI):
     await auto_select_working_ai_models()
     poller_worker = asyncio.create_task(background_poller_task())
     ticker_worker = asyncio.create_task(live_price_ticker_task())
+    liquidity_worker = asyncio.create_task(periodic_liquidity_profile_updater_task())
     yield
     poller_state.poller_active = False
     poller_worker.cancel()
     ticker_worker.cancel()
+    liquidity_worker.cancel()
     try:
-        await asyncio.gather(poller_worker, ticker_worker, return_exceptions=True)
+        await asyncio.gather(poller_worker, ticker_worker, liquidity_worker, return_exceptions=True)
     except Exception:
         pass
     logger.info("Server shutdown complete.")
@@ -2014,6 +2248,117 @@ async def stream_events(request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+# ---------------------------------------------------------------------------
+# Liquidity Profile & Zone Alerts API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/liquidity/profile")
+async def get_liquidity_profile():
+    """Returns the full 300-bar Dynamic Liquidity HeatMap Profile."""
+    global _latest_liquidity_profile
+    if not _latest_liquidity_profile:
+        await refresh_liquidity_profile()
+    if not _latest_liquidity_profile:
+        raise HTTPException(status_code=503, detail="Liquidity profile is initializing...")
+    return serialize_liquidity_profile(_latest_liquidity_profile)
+
+@app.get("/api/liquidity/zones")
+async def get_liquidity_zones():
+    """Returns all active APEX, Major, and HQ Pullback zones with real-time distance."""
+    global _latest_liquidity_profile
+    if not _latest_liquidity_profile:
+        await refresh_liquidity_profile()
+    if not _latest_liquidity_profile:
+        return {"zones": [], "nearest_support": None, "nearest_resistance": None}
+    
+    current_p = poller_state.current_gold_price
+    zones_data = []
+    for z in _latest_liquidity_profile.all_active_zones:
+        dist = 0.0
+        if current_p < z.lower:
+            dist = round(z.lower - current_p, 2)
+        elif current_p > z.upper:
+            dist = round(current_p - z.upper, 2)
+        zones_data.append({
+            **vars(z),
+            "distance": dist,
+            "is_inside": bool(z.lower <= current_p <= z.upper),
+            "is_nearing": bool(dist <= zone_radar.proximity_buffer_usd and dist > 0),
+        })
+
+    return {
+        "current_price": current_p,
+        "trend_state": _latest_liquidity_profile.trend_state,
+        "trend_label": _latest_liquidity_profile.trend_label,
+        "poc_price": _latest_liquidity_profile.poc_price,
+        "zones": zones_data,
+        "nearest_support": vars(_latest_liquidity_profile.nearest_support) if _latest_liquidity_profile.nearest_support else None,
+        "nearest_resistance": vars(_latest_liquidity_profile.nearest_resistance) if _latest_liquidity_profile.nearest_resistance else None,
+    }
+
+@app.get("/api/liquidity/alerts")
+async def get_liquidity_alerts(limit: int = 50):
+    """Returns recent zone proximity & touch alert events."""
+    return {"alerts": _recent_zone_alerts[:limit], "count": len(_recent_zone_alerts)}
+
+@app.post("/api/liquidity/test-alert")
+async def trigger_test_zone_alert(event_type: str = "ENTERED"):
+    """
+    Diagnostic endpoint allowing users/testers to dispatch a sample
+    Telegram zone alert immediately for verification.
+    """
+    global _latest_liquidity_profile
+    if not _latest_liquidity_profile:
+        await refresh_liquidity_profile()
+    
+    target_zone = _latest_liquidity_profile.apex_zone or (_latest_liquidity_profile.all_active_zones[0] if _latest_liquidity_profile and _latest_liquidity_profile.all_active_zones else None)
+    
+    if not target_zone:
+        target_zone = LiquidityZone(
+            id="test_zone_demo",
+            bin_index=25,
+            lower=poller_state.current_gold_price - 2.0,
+            upper=poller_state.current_gold_price + 2.0,
+            mid=poller_state.current_gold_price,
+            volume=2500.0,
+            volume_pct=96.5,
+            is_lower=True,
+            is_major=True,
+            is_apex=True,
+            is_pullback=False,
+            zone_type="Pro Continuation Long 🌟 APEX ZONE",
+            signal="BUY",
+            sl_price=poller_state.current_gold_price - 2.0,
+            start_bar=250,
+            box_color="rgba(16, 185, 129, 0.20)",
+            border_color="#10b981",
+        )
+
+    ev_type = "ENTERED" if event_type.upper() == "ENTERED" else "NEARING"
+    test_event = ZoneAlertEvent(
+        event_type=ev_type,
+        zone=target_zone,
+        current_price=poller_state.current_gold_price,
+        distance=0.0 if ev_type == "ENTERED" else 1.25,
+        timestamp=datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
+        message=f"[TEST ALERT] Price ${poller_state.current_gold_price:.2f} {ev_type} {target_zone.zone_type}",
+    )
+
+    dispatched = await dispatch_zone_telegram_alert(test_event, profile=_latest_liquidity_profile)
+    formatted_html = format_zone_telegram_alert(test_event, profile=_latest_liquidity_profile)
+
+    return {
+        "status": "dispatched" if dispatched else "logged_mock",
+        "telegram_configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
+        "event": {
+            "type": ev_type,
+            "zone": target_zone.zone_type,
+            "price": poller_state.current_gold_price,
+            "range": f"${target_zone.lower:.2f} - ${target_zone.upper:.2f}",
+        },
+        "formatted_html": formatted_html,
+    }
 
 if __name__ == "__main__":
     import uvicorn

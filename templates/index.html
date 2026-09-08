@@ -405,6 +405,172 @@
       </div>
     </section>
 
+    <!-- ================= 4b. DYNAMIC LIQUIDITY HEATMAP PROFILE [PRO SYSTEM] ================= -->
+    <section class="glass-card p-5 rounded-2xl border border-gold-accent/30 bg-gradient-to-br from-zinc-950/90 via-zinc-900/90 to-zinc-950/95 shadow-2xl space-y-4">
+      
+      <!-- Header Row -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-zinc-800/80 pb-3.5">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gold-accent/15 border border-gold-accent/40 flex items-center justify-center text-gold-accent shadow-sm">
+            <i data-lucide="layers" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-bold tracking-wider text-zinc-100 uppercase font-mono">Dynamic Liquidity HeatMap Profile</h2>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">PRO SYSTEM v6</span>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">PINE SCRIPT ENGINE</span>
+            </div>
+            <p class="text-[11px] text-zinc-400 font-mono mt-0.5">
+              Dual-EMA Trend Confirmation • 50-Bin Liquidity Profile • APEX & HQ Pullback Invalidation Radar
+            </p>
+          </div>
+        </div>
+
+        <!-- Action Controls & Badges -->
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="liquidity-trend-pill" class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-zinc-800 text-zinc-300 border border-zinc-700 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Calculating Trend...</span>
+          </span>
+          <span id="liquidity-poc-pill" class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-orange-500/20 text-orange-400 border border-orange-500/40 flex items-center gap-1">
+            <span>POC:</span> <span id="liquidity-poc-val">--</span>
+          </span>
+          <button onclick="triggerTestTelegramAlert('ENTERED')" class="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-mono font-bold transition-all flex items-center gap-1.5 active:scale-95" title="Dispatches an immediate sample alert to configured Telegram chat">
+            <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            <span>Test Telegram Alert</span>
+          </button>
+          <button onclick="fetchLiquidityProfile(true)" class="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition-colors" title="Force refresh 300-bar liquidity calculation">
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Zone Radar Grid (Support & Resistance Proximity) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+        
+        <!-- Radar Box 1: Nearest Demand / Support -->
+        <div id="radar-support-box" class="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/30 flex flex-col justify-between relative overflow-hidden">
+          <div class="flex items-center justify-between text-xs font-mono mb-1.5">
+            <span class="text-emerald-400 font-bold flex items-center gap-1.5">
+              <i data-lucide="arrow-down-circle" class="w-4 h-4"></i>
+              <span>NEAREST DEMAND / SUPPORT</span>
+            </span>
+            <span id="radar-support-badge" class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+              SAFE
+            </span>
+          </div>
+          <div class="my-2">
+            <div class="text-sm font-bold text-zinc-100 font-mono" id="radar-support-type">Scanning Zones...</div>
+            <div class="text-lg font-mono font-extrabold text-emerald-400 mt-1" id="radar-support-range">--</div>
+          </div>
+          <div class="pt-2 border-t border-emerald-500/20 flex items-center justify-between text-[11px] font-mono text-zinc-300">
+            <span>Distance: <b id="radar-support-dist" class="text-emerald-300">--</b></span>
+            <span>Stop Loss: <b id="radar-support-sl" class="text-zinc-200">--</b></span>
+          </div>
+        </div>
+
+        <!-- Radar Box 2: Current Spot Price Pivot & Multi-Timeframe Context -->
+        <div class="p-4 rounded-xl bg-zinc-900/90 border border-zinc-800 flex flex-col justify-between items-center text-center">
+          <div class="text-[11px] font-mono text-zinc-400 uppercase tracking-wider">
+            Spot Price Proximity Radar
+          </div>
+          <div class="my-1.5">
+            <div id="radar-current-price" class="text-3xl font-mono font-black text-gold-accent tracking-tight">$4,390.46</div>
+            <div id="radar-dual-ma-context" class="text-[11px] font-mono text-zinc-400 mt-1">
+              EMA 50: -- | EMA 200: --
+            </div>
+          </div>
+          <div class="w-full bg-zinc-800/80 rounded-lg p-2 flex items-center justify-around text-[10px] font-mono text-zinc-300">
+            <span>Buffer: <b>$2.00 USD</b></span>
+            <span class="text-zinc-600">|</span>
+            <span>ATR(5): <b id="radar-atr-val">--</b></span>
+            <span class="text-zinc-600">|</span>
+            <span class="text-gold-accent font-bold">Auto Telegram</span>
+          </div>
+        </div>
+
+        <!-- Radar Box 3: Nearest Supply / Resistance -->
+        <div id="radar-resistance-box" class="p-4 rounded-xl bg-rose-950/20 border border-rose-500/30 flex flex-col justify-between relative overflow-hidden">
+          <div class="flex items-center justify-between text-xs font-mono mb-1.5">
+            <span class="text-rose-400 font-bold flex items-center gap-1.5">
+              <i data-lucide="arrow-up-circle" class="w-4 h-4"></i>
+              <span>NEAREST SUPPLY / RESISTANCE</span>
+            </span>
+            <span id="radar-resistance-badge" class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-rose-500/20 text-rose-300 border border-rose-500/40">
+              SAFE
+            </span>
+          </div>
+          <div class="my-2">
+            <div class="text-sm font-bold text-zinc-100 font-mono" id="radar-resistance-type">Scanning Zones...</div>
+            <div class="text-lg font-mono font-extrabold text-rose-400 mt-1" id="radar-resistance-range">--</div>
+          </div>
+          <div class="pt-2 border-t border-rose-500/20 flex items-center justify-between text-[11px] font-mono text-zinc-300">
+            <span>Distance: <b id="radar-resistance-dist" class="text-rose-300">--</b></span>
+            <span>Stop Loss: <b id="radar-resistance-sl" class="text-zinc-200">--</b></span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Main Profile Visualization & Zones Split Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 pt-1">
+        
+        <!-- Left: 50-Bin HeatMap Volume Histogram (7 Columns) -->
+        <div class="lg:col-span-7 p-4 rounded-xl bg-zinc-900/70 border border-zinc-800 flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-3 border-b border-zinc-800/80 pb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold font-mono text-zinc-200 uppercase">50-Bin Liquidity Distribution</span>
+              <span class="text-[10px] font-mono text-zinc-500">(300-Bar Pine Script Profile)</span>
+            </div>
+            <div class="flex items-center gap-3 text-[10px] font-mono">
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-orange-500"></span> POC</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> APEX / Major</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-teal-400"></span> HQ Pullback</span>
+            </div>
+          </div>
+
+          <!-- The Bar Canvas for 50 Bins -->
+          <div id="liquidity-bins-container" class="space-y-1 max-h-[300px] overflow-y-auto pr-1">
+            <div class="text-center py-8 text-xs font-mono text-zinc-500">Generating 50-bin profile...</div>
+          </div>
+        </div>
+
+        <!-- Right: Active Zones Table & Telegram Alert Feed (5 Columns) -->
+        <div class="lg:col-span-5 flex flex-col gap-3">
+          
+          <!-- Active Pro Zones List -->
+          <div class="p-4 rounded-xl bg-zinc-900/70 border border-zinc-800 flex-1 flex flex-col">
+            <div class="flex items-center justify-between mb-2.5 border-b border-zinc-800/80 pb-2">
+              <span class="text-xs font-bold font-mono text-zinc-200 uppercase">Active Liquidity Zones</span>
+              <span id="active-zones-count-pill" class="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">0 zones</span>
+            </div>
+            <div id="active-zones-list" class="space-y-2 overflow-y-auto max-h-[160px] pr-1">
+              <div class="text-xs font-mono text-zinc-500 text-center py-4">No active zones detected</div>
+            </div>
+          </div>
+
+          <!-- Telegram Alert Activity Log -->
+          <div class="p-4 rounded-xl bg-zinc-900/70 border border-zinc-800 flex-1 flex flex-col">
+            <div class="flex items-center justify-between mb-2.5 border-b border-zinc-800/80 pb-2">
+              <div class="flex items-center gap-1.5">
+                <i data-lucide="bell-ring" class="w-3.5 h-3.5 text-gold-accent"></i>
+                <span class="text-xs font-bold font-mono text-zinc-200 uppercase">Telegram Zone Dispatch Log</span>
+              </div>
+              <span class="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> Live Radar
+              </span>
+            </div>
+            <div id="zone-alerts-feed" class="space-y-2 overflow-y-auto max-h-[120px] pr-1">
+              <div class="text-[11px] font-mono text-zinc-500 text-center py-2">Waiting for zone proximity triggers...</div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
     <!-- ================= 5. REAL-TIME FILTER TOOLBAR ================= -->
     <section class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
       
@@ -1092,6 +1258,12 @@
               latencyText.textContent = `${pingMs}ms latency`;
             } else if (msg.type === 'price_tick') {
               updatePriceTicker(msg.data);
+            } else if (msg.type === 'liquidity_profile') {
+              renderLiquidityProfile(msg.data);
+            } else if (msg.type === 'liquidity_tick') {
+              updateLiquidityTick(msg.data);
+            } else if (msg.type === 'zone_alert') {
+              handleZoneAlert(msg.data);
             } else if (msg.type === 'new_event') {
               handleIncomingEvent(msg.data);
             }
@@ -1121,6 +1293,18 @@
 
       eventSource.addEventListener('price_tick', (e) => {
         try { updatePriceTicker(JSON.parse(e.data)); } catch (err) {}
+      });
+
+      eventSource.addEventListener('liquidity_profile', (e) => {
+        try { renderLiquidityProfile(JSON.parse(e.data)); } catch (err) {}
+      });
+
+      eventSource.addEventListener('liquidity_tick', (e) => {
+        try { updateLiquidityTick(JSON.parse(e.data)); } catch (err) {}
+      });
+
+      eventSource.addEventListener('zone_alert', (e) => {
+        try { handleZoneAlert(JSON.parse(e.data)); } catch (err) {}
       });
 
       eventSource.addEventListener('new_event', (e) => {
@@ -1612,6 +1796,317 @@
       });
     }
 
+    // =========================================================================
+    // DYNAMIC LIQUIDITY HEATMAP PROFILE & ZONE RADAR CONTROLLER
+    // =========================================================================
+
+    let currentLiquidityProfile = null;
+
+    async function fetchLiquidityProfile(forceRefresh = false) {
+      try {
+        const res = await fetch('/api/liquidity/profile');
+        if (res.ok) {
+          const profile = await res.json();
+          renderLiquidityProfile(profile);
+          fetchLiquidityAlerts();
+        }
+      } catch (err) {
+        console.warn('Failed to fetch liquidity profile:', err);
+      }
+    }
+
+    async function fetchLiquidityAlerts() {
+      try {
+        const res = await fetch('/api/liquidity/alerts?limit=15');
+        if (res.ok) {
+          const data = await res.json();
+          renderZoneAlertsFeed(data.alerts || []);
+        }
+      } catch (err) {}
+    }
+
+    function renderLiquidityProfile(profile) {
+      if (!profile) return;
+      currentLiquidityProfile = profile;
+
+      // 1. Trend Pill
+      const trendPill = document.getElementById('liquidity-trend-pill');
+      if (trendPill) {
+        if (profile.trend_state === 1) {
+          trendPill.className = 'px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1.5';
+          trendPill.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span><span>Bullish Continuation (EMA50 > EMA200)</span>';
+        } else if (profile.trend_state === -1) {
+          trendPill.className = 'px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40 flex items-center gap-1.5';
+          trendPill.innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span><span>Bearish Continuation (EMA50 < EMA200)</span>';
+        } else {
+          trendPill.className = 'px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5';
+          trendPill.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-400"></span><span>Ranging / Consolidation</span>';
+        }
+      }
+
+      // 2. POC
+      const pocVal = document.getElementById('liquidity-poc-val');
+      if (pocVal) pocVal.textContent = `$${profile.poc_price.toFixed(2)}`;
+
+      // 3. Radar Spot Price & Metrics
+      const radarPrice = document.getElementById('radar-current-price');
+      if (radarPrice) radarPrice.textContent = `$${profile.current_price.toFixed(2)}`;
+
+      const dualMaCtx = document.getElementById('radar-dual-ma-context');
+      if (dualMaCtx) dualMaCtx.textContent = `EMA 50: $${profile.fast_ma.toFixed(2)} | EMA 200: $${profile.slow_ma.toFixed(2)}`;
+
+      const atrVal = document.getElementById('radar-atr-val');
+      if (atrVal) atrVal.textContent = `$${profile.atr.toFixed(2)}`;
+
+      // 4. Nearest Support Box
+      updateRadarSupportBox(profile.nearest_support, profile.distance_to_nearest_support, profile.current_price);
+
+      // 5. Nearest Resistance Box
+      updateRadarResistanceBox(profile.nearest_resistance, profile.distance_to_nearest_resistance, profile.current_price);
+
+      // 6. Render 50 Bins
+      render50Bins(profile.heatmap_bins, profile.current_price, profile.poc_price);
+
+      // 7. Render Active Zones
+      renderActiveZonesList(profile.all_active_zones, profile.current_price);
+
+      renderIcons();
+    }
+
+    function updateRadarSupportBox(sup, dist, currentPrice) {
+      const typeElem = document.getElementById('radar-support-type');
+      const rangeElem = document.getElementById('radar-support-range');
+      const distElem = document.getElementById('radar-support-dist');
+      const slElem = document.getElementById('radar-support-sl');
+      const badgeElem = document.getElementById('radar-support-badge');
+      const boxElem = document.getElementById('radar-support-box');
+
+      if (!sup) {
+        if (typeElem) typeElem.textContent = 'No Immediate Support';
+        if (rangeElem) rangeElem.textContent = '--';
+        if (distElem) distElem.textContent = '--';
+        if (slElem) slElem.textContent = '--';
+        return;
+      }
+
+      if (typeElem) typeElem.textContent = sup.zone_type;
+      if (rangeElem) rangeElem.textContent = `$${sup.lower.toFixed(2)} - $${sup.upper.toFixed(2)}`;
+      if (slElem) slElem.textContent = `$${sup.sl_price.toFixed(2)}`;
+
+      const distance = dist !== null && dist !== undefined ? dist : Math.max(0, currentPrice - sup.upper);
+      if (distElem) distElem.textContent = distance === 0 ? 'INSIDE ZONE' : `$${distance.toFixed(2)} away`;
+
+      if (currentPrice >= sup.lower && currentPrice <= sup.upper) {
+        badgeElem.textContent = 'ZONE TOUCHED';
+        badgeElem.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500 text-obsidian border border-emerald-400 animate-pulse';
+        boxElem.className = 'p-4 rounded-xl bg-emerald-950/40 border-2 border-emerald-400 flex flex-col justify-between relative overflow-hidden shadow-lg shadow-emerald-500/20';
+      } else if (distance <= 2.0) {
+        badgeElem.textContent = 'NEARING (<$2.00)';
+        badgeElem.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-amber-500 text-obsidian border border-amber-400 animate-pulse';
+        boxElem.className = 'p-4 rounded-xl bg-amber-950/20 border border-amber-500/50 flex flex-col justify-between relative overflow-hidden';
+      } else {
+        badgeElem.textContent = 'ACTIVE DEMAND';
+        badgeElem.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+        boxElem.className = 'p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/30 flex flex-col justify-between relative overflow-hidden';
+      }
+    }
+
+    function updateRadarResistanceBox(res, dist, currentPrice) {
+      const typeElem = document.getElementById('radar-resistance-type');
+      const rangeElem = document.getElementById('radar-resistance-range');
+      const distElem = document.getElementById('radar-resistance-dist');
+      const slElem = document.getElementById('radar-resistance-sl');
+      const badgeElem = document.getElementById('radar-resistance-badge');
+      const boxElem = document.getElementById('radar-resistance-box');
+
+      if (!res) {
+        if (typeElem) typeElem.textContent = 'No Overhead Resistance';
+        if (rangeElem) rangeElem.textContent = '--';
+        if (distElem) distElem.textContent = '--';
+        if (slElem) slElem.textContent = '--';
+        return;
+      }
+
+      if (typeElem) typeElem.textContent = res.zone_type;
+      if (rangeElem) rangeElem.textContent = `$${res.lower.toFixed(2)} - $${res.upper.toFixed(2)}`;
+      if (slElem) slElem.textContent = `$${res.sl_price.toFixed(2)}`;
+
+      const distance = dist !== null && dist !== undefined ? dist : Math.max(0, res.lower - currentPrice);
+      if (distElem) distElem.textContent = distance === 0 ? 'INSIDE ZONE' : `$${distance.toFixed(2)} away`;
+
+      if (currentPrice >= res.lower && currentPrice <= res.upper) {
+        badgeElem.textContent = 'ZONE TOUCHED';
+        badgeElem.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-rose-500 text-obsidian border border-rose-400 animate-pulse';
+        boxElem.className = 'p-4 rounded-xl bg-rose-950/40 border-2 border-rose-400 flex flex-col justify-between relative overflow-hidden shadow-lg shadow-rose-500/20';
+      } else if (distance <= 2.0) {
+        badgeElem.textContent = 'NEARING (<$2.00)';
+        badgeElem.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-amber-500 text-obsidian border border-amber-400 animate-pulse';
+        boxElem.className = 'p-4 rounded-xl bg-amber-950/20 border border-amber-500/50 flex flex-col justify-between relative overflow-hidden';
+      } else {
+        badgeElem.textContent = 'ACTIVE SUPPLY';
+        badgeElem.className = 'px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-rose-500/20 text-rose-300 border border-rose-500/40';
+        boxElem.className = 'p-4 rounded-xl bg-rose-950/20 border border-rose-500/30 flex flex-col justify-between relative overflow-hidden';
+      }
+    }
+
+    function render50Bins(bins, currentPrice, pocPrice) {
+      const container = document.getElementById('liquidity-bins-container');
+      if (!container || !bins) return;
+
+      const sortedBins = [...bins].reverse();
+      
+      let html = '';
+      sortedBins.forEach(b => {
+        const isCurrentPriceHere = (currentPrice >= b.lower && currentPrice <= b.upper);
+        const widthPct = Math.min(100, Math.max(3, b.value_vol * 2));
+        
+        let label = `$${b.mid.toFixed(1)}`;
+        if (b.is_poc) label += ' ★ POC';
+        if (isCurrentPriceHere) label += ' ◀ SPOT';
+
+        html += `
+          <div class="flex items-center gap-2 text-[10px] font-mono py-0.5 hover:bg-zinc-800/60 rounded px-1 transition-colors ${isCurrentPriceHere ? 'bg-gold-accent/15 border-l-2 border-gold-accent font-bold' : ''}">
+            <span class="w-24 text-zinc-400 text-right shrink-0 ${isCurrentPriceHere ? 'text-gold-accent font-bold' : ''}">${label}</span>
+            <div class="flex-1 bg-zinc-800/50 h-3.5 rounded overflow-hidden flex items-center">
+              <div class="h-full rounded-sm transition-all duration-300 flex items-center justify-end px-1 text-[9px] font-bold text-obsidian"
+                   style="width: ${widthPct}%; background-color: ${b.color};">
+                ${b.is_poc || b.is_major ? `${Math.round(b.volume)}` : ''}
+              </div>
+            </div>
+            <span class="w-12 text-zinc-500 text-right shrink-0">${Math.round(b.value_vol * 2)}%</span>
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    function renderActiveZonesList(zones, currentPrice) {
+      const container = document.getElementById('active-zones-list');
+      const countPill = document.getElementById('active-zones-count-pill');
+      if (!container) return;
+
+      if (!zones || zones.length === 0) {
+        container.innerHTML = '<div class="text-xs font-mono text-zinc-500 text-center py-4">No active zones detected in current window</div>';
+        if (countPill) countPill.textContent = '0 zones';
+        return;
+      }
+
+      if (countPill) countPill.textContent = `${zones.length} zones`;
+
+      let html = '';
+      zones.forEach(z => {
+        const isInside = (currentPrice >= z.lower && currentPrice <= z.upper);
+        const distance = currentPrice < z.lower ? (z.lower - currentPrice) : (currentPrice > z.upper ? currentPrice - z.upper : 0.0);
+        const isNearing = distance > 0 && distance <= 2.0;
+
+        let statusBadge = `<span class="text-[10px] font-mono text-zinc-400">${distance.toFixed(2)} away</span>`;
+        if (isInside) {
+          statusBadge = `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold font-mono bg-emerald-500 text-obsidian animate-pulse">INSIDE</span>`;
+        } else if (isNearing) {
+          statusBadge = `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold font-mono bg-amber-500 text-obsidian animate-pulse">NEARING</span>`;
+        }
+
+        html += `
+          <div class="p-2 rounded-lg bg-zinc-800/60 border border-zinc-700/60 flex items-center justify-between text-xs font-mono hover:border-zinc-500 transition-colors">
+            <div>
+              <div class="font-bold flex items-center gap-1.5" style="color: ${z.border_color}">
+                <span>${z.zone_type}</span>
+                ${z.is_apex ? '<span class="text-[9px] px-1 rounded bg-amber-500/20 text-amber-300">APEX</span>' : ''}
+              </div>
+              <div class="text-[11px] text-zinc-300 mt-0.5">
+                $${z.lower.toFixed(2)} - $${z.upper.toFixed(2)} • SL: <span class="text-zinc-400">$${z.sl_price.toFixed(2)}</span>
+              </div>
+            </div>
+            <div class="text-right">
+              ${statusBadge}
+              <div class="text-[10px] text-zinc-400 mt-0.5">${z.volume_pct.toFixed(0)}% Vol</div>
+            </div>
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    function renderZoneAlertsFeed(alerts) {
+      const container = document.getElementById('zone-alerts-feed');
+      if (!container) return;
+
+      if (!alerts || alerts.length === 0) {
+        container.innerHTML = '<div class="text-[11px] font-mono text-zinc-500 text-center py-2">Waiting for zone proximity triggers...</div>';
+        return;
+      }
+
+      let html = '';
+      alerts.slice(0, 5).forEach(a => {
+        const isEntered = a.event_type === 'ENTERED';
+        html += `
+          <div class="p-2 rounded bg-zinc-800/40 border border-zinc-700/40 text-[11px] font-mono flex items-start justify-between gap-2">
+            <div class="flex items-start gap-1.5">
+              <span class="mt-0.5 ${isEntered ? 'text-emerald-400 font-bold' : 'text-amber-400'}">${isEntered ? '🎯' : '⚠️'}</span>
+              <div>
+                <span class="font-bold text-zinc-200">${a.zone_type}</span>
+                <span class="text-zinc-400 ml-1">(${a.range})</span>
+                <div class="text-[10px] text-zinc-400">${a.message}</div>
+              </div>
+            </div>
+            <span class="text-[9px] text-zinc-500 shrink-0">${a.timestamp}</span>
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    function updateLiquidityTick(tick) {
+      if (!tick) return;
+      const radarPrice = document.getElementById('radar-current-price');
+      if (radarPrice) radarPrice.textContent = `$${tick.price.toFixed(2)}`;
+
+      if (currentLiquidityProfile) {
+        currentLiquidityProfile.current_price = tick.price;
+        if (tick.nearest_support) {
+          updateRadarSupportBox(currentLiquidityProfile.nearest_support, tick.nearest_support.distance, tick.price);
+        }
+        if (tick.nearest_resistance) {
+          updateRadarResistanceBox(currentLiquidityProfile.nearest_resistance, tick.nearest_resistance.distance, tick.price);
+        }
+      }
+    }
+
+    function handleZoneAlert(alertData) {
+      fetchLiquidityAlerts();
+
+      // Show high-visibility notification toast
+      const toast = document.createElement('div');
+      const isEntered = alertData.event_type === 'ENTERED';
+      toast.className = `fixed bottom-5 right-5 z-50 p-4 rounded-xl shadow-2xl border flex items-start gap-3 animate-slide-in max-w-sm ${isEntered ? 'bg-emerald-950/95 border-emerald-500 text-emerald-100' : 'bg-amber-950/95 border-amber-500 text-amber-100'}`;
+      toast.innerHTML = `
+        <span class="text-xl">${isEntered ? '🎯' : '⚠️'}</span>
+        <div>
+          <div class="font-bold font-mono text-xs uppercase">${isEntered ? 'Zone Reached / Touched' : 'Nearing Liquidity Zone'}</div>
+          <div class="text-xs font-mono mt-0.5">${alertData.zone_type}</div>
+          <div class="text-[11px] opacity-80 mt-1">${alertData.range} • Spot: $${alertData.current_price.toFixed(2)}</div>
+        </div>
+      `;
+      document.body.appendChild(toast);
+      setTimeout(() => { toast.remove(); }, 6000);
+    }
+
+    async function triggerTestTelegramAlert(eventType = 'ENTERED') {
+      try {
+        const res = await fetch(`/api/liquidity/test-alert?event_type=${eventType}`, { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          alert(`Test Alert Dispatched (${data.status})!\n\nZone: ${data.event.zone}\nPrice: $${data.event.price}\nTelegram Configured: ${data.telegram_configured ? 'YES' : 'NO (Logged to Server Console)'}`);
+          fetchLiquidityAlerts();
+        }
+      } catch (err) {
+        alert('Error dispatching test alert: ' + err.message);
+      }
+    }
+
     // App Startup
     window.addEventListener('DOMContentLoaded', async () => {
       renderIcons();
@@ -1620,6 +2115,7 @@
       setupInteractions();
       await fetchInitialOandaPrice();
       await fetchInitialEvents();
+      await fetchLiquidityProfile();
       initRealtimeStream();
 
       // Check configured engine and display active AI model (Priority: Gemini -> OpenRouter -> Groq -> OpenAI)

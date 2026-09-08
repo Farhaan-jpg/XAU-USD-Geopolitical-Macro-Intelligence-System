@@ -4,12 +4,19 @@ Verification Test Suite for XAU/USD Geopolitical & Macro Intelligence System
 
 import asyncio
 import json
+import math
 import os
 import sys
 from datetime import datetime, timezone
 
 # Ensure current dir is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 from app import (
     app,
@@ -34,6 +41,16 @@ from app import (
     OPENROUTER_CANDIDATE_MODELS,
     OPENAI_CANDIDATE_MODELS,
     generate_macro_event_scenarios,
+    format_zone_telegram_alert,
+    dispatch_zone_telegram_alert,
+)
+from liquidity_engine import (
+    CandleBar,
+    LiquidityEngine,
+    ZoneRadar,
+    LiquidityZone,
+    ZoneAlertEvent,
+    fetch_ohlcv_bars,
 )
 from httpx import ASGITransport, AsyncClient
 
@@ -305,6 +322,153 @@ async def test_ai_fallback_cascade():
     assert "gold_bias" in res
     print(f"  [PASS] Multi-provider AI cascade verified: {len(GROQ_CANDIDATE_MODELS)} Groq, {len(GEMINI_CANDIDATE_MODELS)} Gemini, {len(OPENROUTER_CANDIDATE_MODELS)} OpenRouter, {len(OPENAI_CANDIDATE_MODELS)} OpenAI models, seamless heuristic fallback active.")
 
+async def test_liquidity_heatmap_engine():
+    print("\n--- 7. Testing Dynamic Liquidity HeatMap Profile (Pine Script Engine) ---")
+    
+    # 1. Generate 300 test bars simulating gold market with trend and pullback
+    bars = []
+    base_price = 4380.0
+    now_ts = 1720000000.0
+    for i in range(300):
+        t = now_ts + i * 900
+        # Simulating upward drift then consolidation
+        drift = (i / 300.0) * 25.0 + math.sin(i / 10.0) * 8.0
+        p = base_price + drift
+        bars.append(CandleBar(
+            timestamp=t,
+            open=round(p - 1.0, 2),
+            high=round(p + 2.5, 2),
+            low=round(p - 2.5, 2),
+            close=round(p, 2),
+            volume=round(100.0 + (i % 20) * 15.0, 2),
+        ))
+
+    engine = LiquidityEngine(lookback=300, bins=50, resolution=100)
+    current_spot = bars[-1].close
+    res = engine.compute(bars, current_spot_price=current_spot)
+
+    assert res.symbol == "XAU/USD"
+    assert res.bins_count == 50
+    assert len(res.heatmap_bins) == 50, "Profile must calculate exactly 50 heatmap bins"
+    assert res.top_boundary > res.bot_boundary, "Top dynamic boundary must exceed bottom boundary"
+    assert res.poc_price >= res.bot_boundary and res.poc_price <= res.top_boundary, "POC price must be within boundaries"
+    assert res.atr > 0, "ATR must be strictly positive"
+    assert res.trend_state in [-1, 0, 1], "Trend state must be -1, 0, or 1"
+
+    print(f"  [PASS] 50-bin profile calculated: Range [${res.bot_boundary:.2f} - ${res.top_boundary:.2f}], POC: ${res.poc_price:.2f}")
+    print(f"  [PASS] Trend classified: {res.trend_label} (Fast MA: ${res.fast_ma:.2f}, Slow MA: ${res.slow_ma:.2f})")
+    print(f"  [PASS] Active zones identified: {len(res.all_active_zones)} total (Major: {len(res.major_zones)}, Pullbacks: {len(res.pullback_zones)})")
+
+    # Invalidation stop loss verification
+    for z in res.all_active_zones:
+        if z.is_lower:
+            assert z.sl_price == z.lower, "Long zone stop loss must equal lower boundary"
+        else:
+            assert z.sl_price == z.upper, "Short zone stop loss must equal upper boundary"
+    print("  [PASS] Pine Script invalidation Stop Loss levels verified for all active zones")
+
+async def test_zone_radar_and_telegram_alerts():
+    print("\n--- 8. Testing Real-Time Zone Radar & Telegram Alert Dispatcher ---")
+    
+    # Create test zone
+    test_zone = LiquidityZone(
+        id="test_apex_long",
+        bin_index=20,
+        lower=4375.00,
+        upper=4380.00,
+        mid=4377.50,
+        volume=3200.0,
+        volume_pct=100.0,
+        is_lower=True,
+        is_major=True,
+        is_apex=True,
+        is_pullback=False,
+        zone_type="Pro Continuation Long 🌟 APEX ZONE",
+        signal="BUY",
+        sl_price=4375.00,
+        start_bar=200,
+        box_color="rgba(16, 185, 129, 0.20)",
+        border_color="#10b981",
+    )
+
+    class DummyProfile:
+        symbol = "XAU/USD"
+        current_price = 4385.00
+        trend_label = "Bullish Continuation (EMA 50 > EMA 200)"
+        fast_ma = 4390.00
+        slow_ma = 4370.00
+        poc_price = 4377.50
+        poc_volume = 3200.0
+        atr = 2.45
+        all_active_zones = [test_zone]
+
+    radar = ZoneRadar(proximity_buffer_usd=2.00, cooldown_seconds=60.0)
+
+    # 1. Price is far outside ($4,385.00 -> $5.00 away from upper $4,380.00)
+    events = radar.evaluate_price(4385.00, DummyProfile)
+    assert len(events) == 0, "No alerts should trigger when price is outside proximity buffer"
+
+    # 2. Price nears zone ($4,381.50 -> $1.50 away from upper $4,380.00, within $2 buffer)
+    events_near = radar.evaluate_price(4381.50, DummyProfile)
+    assert len(events_near) == 1, "NEARING alert must trigger when price is within buffer"
+    assert events_near[0].event_type == "NEARING"
+    assert events_near[0].distance == 1.50
+    print(f"  [PASS] Zone Radar correctly detected NEARING event: {events_near[0].message}")
+
+    # 3. Repeat price tick during cooldown -> suppressed
+    events_dup = radar.evaluate_price(4381.20, DummyProfile)
+    assert len(events_dup) == 0, "Cooldown guard must suppress repeated NEARING alert"
+    print("  [PASS] Anti-spam cooldown correctly suppressed duplicate NEARING alert")
+
+    # 4. Price enters zone ($4,378.00 is between 4375 and 4380)
+    events_inside = radar.evaluate_price(4378.00, DummyProfile)
+    assert len(events_inside) == 1, "ENTERED alert must trigger on zone touch/entry"
+    assert events_inside[0].event_type == "ENTERED"
+    assert events_inside[0].distance == 0.0
+    print(f"  [PASS] Zone Radar correctly detected ENTERED event: {events_inside[0].message}")
+
+    # 5. Telegram Alert Formatter Test
+    html_alert = format_zone_telegram_alert(events_inside[0], profile=DummyProfile)
+    assert "ZONE REACHED / TOUCHED" in html_alert
+    assert "XAU/USD (Spot Gold)" in html_alert
+    assert "APEX ZONE" in html_alert
+    assert "$4375.00" in html_alert and "Stop Loss (SL)" in html_alert
+    assert "Bullish Continuation" in html_alert
+    print("  [PASS] Telegram Zone Alert Formatter produced compliant, high-visibility HTML")
+
+    # 6. Telegram Dispatch Test (Mock fallback if keys not configured)
+    dispatched = await dispatch_zone_telegram_alert(events_inside[0], profile=DummyProfile)
+    print("  [PASS] Telegram Zone Alert Dispatch executed safely without unhandled exceptions")
+
+async def test_liquidity_api_endpoints():
+    print("\n--- 9. Testing Liquidity Engine REST Endpoints ---")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # GET /api/liquidity/profile
+        r = await ac.get("/api/liquidity/profile")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["symbol"] == "XAU/USD"
+        assert "poc_price" in data
+        assert "heatmap_bins" in data
+        assert len(data["heatmap_bins"]) == 50
+        print("  [PASS] GET /api/liquidity/profile returned full 50-bin profile")
+
+        # GET /api/liquidity/zones
+        r = await ac.get("/api/liquidity/zones")
+        assert r.status_code == 200
+        z_data = r.json()
+        assert "current_price" in z_data
+        assert "zones" in z_data
+        print(f"  [PASS] GET /api/liquidity/zones returned {len(z_data['zones'])} active zones with real-time distance")
+
+        # POST /api/liquidity/test-alert
+        r = await ac.post("/api/liquidity/test-alert?event_type=ENTERED")
+        assert r.status_code == 200
+        alert_res = r.json()
+        assert "formatted_html" in alert_res
+        assert alert_res["event"]["type"] == "ENTERED"
+        print(f"  [PASS] POST /api/liquidity/test-alert triggered verified alert (Status: {alert_res['status']})")
+
 async def run_all_tests():
     print("=================================================================")
     print("Running Full System Verification for XAU/USD Intelligence Engine")
@@ -315,6 +479,9 @@ async def run_all_tests():
     await test_live_feed_ingestion()
     await test_api_endpoints()
     await test_ai_fallback_cascade()
+    await test_liquidity_heatmap_engine()
+    await test_zone_radar_and_telegram_alerts()
+    await test_liquidity_api_endpoints()
     print("\n=================================================================")
     print("ALL TESTS PASSED WITH 100% SUCCESS!")
     print("=================================================================")
