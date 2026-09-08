@@ -208,13 +208,13 @@
         </div>
 
         <!-- Real-Time Voice Squawk Toggle -->
-        <button id="voice-toggle-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950/70 border border-indigo-500/40 text-indigo-300 hover:border-indigo-400 hover:text-indigo-100 transition-all shadow-sm" title="Toggle Real-Time AI Squawk Voice Broadcast">
+        <button id="voice-toggle-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950/70 border border-indigo-500/40 text-indigo-300 hover:border-indigo-400 hover:text-indigo-100 transition-all shadow-sm" title="Toggle Real-Time AI Squawk Voice Broadcast (Indian English Voice en-IN)">
           <div class="relative flex items-center justify-center">
             <i id="voice-icon" data-lucide="mic" class="w-3.5 h-3.5 text-indigo-300"></i>
             <span id="voice-pulse" class="hidden absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
           </div>
           <span class="text-[11px] font-mono font-semibold hidden md:inline">VOICE SQUAWK:</span>
-          <span id="voice-status-text" class="text-[11px] font-mono font-bold text-emerald-400">ON</span>
+          <span id="voice-status-text" class="text-[11px] font-mono font-bold text-emerald-400">ON (en-IN)</span>
         </button>
 
         <!-- Simulate Flash Scenario -->
@@ -573,6 +573,7 @@
   <!-- ================= 9. SCRIPT ENGINE ================= -->
   <script>
     // State Management
+    const pageLoadTime = Date.now();
     let allEvents = [];
     let activeFilter = 'all';
     let searchQuery = '';
@@ -1143,12 +1144,13 @@
       } catch (e) {}
     }
 
-    // Institutional AI Voice Squawk Box (Web Speech API)
+    // Institutional AI Voice Squawk Box (Web Speech API) - Indian English en-IN Engine
     const voiceSquawk = {
       enabled: true,
       speaking: false,
       queue: [],
       selectedVoice: null,
+      spokenIds: new Set(),
 
       init() {
         const saved = localStorage.getItem('aureus_voice_enabled');
@@ -1160,19 +1162,40 @@
         if ('speechSynthesis' in window) {
           const loadVoices = () => {
             const voices = window.speechSynthesis.getVoices();
-            if (voices.length > 0) {
-              this.selectedVoice = voices.find(v => 
-                v.lang.startsWith('en') && (
-                  v.name.includes('Natural') || 
-                  v.name.includes('Google') || 
-                  v.name.includes('Samantha') || 
-                  v.name.includes('David') || 
-                  v.name.includes('Daniel') ||
-                  v.name.includes('Zira')
-                )
-              ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+            if (voices.length === 0) return;
+
+            // 1. High-Priority Selection: Indian English Voices (en-IN)
+            const indianVoice = voices.find(v => 
+              (v.lang === 'en-IN' || v.lang === 'en_IN' || v.lang.toLowerCase().startsWith('en-in')) && (
+                v.name.includes('Natural') || 
+                v.name.includes('Online') || 
+                v.name.includes('Google') || 
+                v.name.includes('Neerja') || 
+                v.name.includes('Prabhat') || 
+                v.name.includes('Heera') || 
+                v.name.includes('Ravi') || 
+                v.name.includes('Veena') ||
+                v.name.includes('Rishi') ||
+                v.name.includes('Sangeeta')
+              )
+            ) || voices.find(v => 
+              v.lang === 'en-IN' || v.lang === 'en_IN' || v.lang.toLowerCase().startsWith('en-in')
+            ) || voices.find(v => 
+              v.name.toLowerCase().includes('india') || v.name.toLowerCase().includes('indian')
+            );
+
+            if (indianVoice) {
+              this.selectedVoice = indianVoice;
+              console.log("[Voice Squawk] Active Indian English voice:", indianVoice.name, "(" + indianVoice.lang + ")");
+            } else {
+              // Fallback to high-clarity natural voice if device OS has not installed Indian English pack
+              this.selectedVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google'))) ||
+                                   voices.find(v => v.lang.startsWith('en')) ||
+                                   voices[0];
+              console.log("[Voice Squawk] Fallback English voice:", this.selectedVoice ? this.selectedVoice.name : 'system default');
             }
           };
+
           loadVoices();
           if (window.speechSynthesis.onvoiceschanged !== undefined) {
             window.speechSynthesis.onvoiceschanged = loadVoices;
@@ -1190,7 +1213,7 @@
         }
         this.updateUi();
         if (this.enabled) {
-          this.speakText("AI Voice Squawk activated. Monitoring live XAU USD geopolitical and macro feed.");
+          this.speakText("AI Voice Squawk activated. Monitoring live XAU USD geopolitical and macro feed with Indian English voice.");
         }
       },
 
@@ -1200,7 +1223,7 @@
         const icon = document.getElementById('voice-icon');
         const btn = document.getElementById('voice-toggle-btn');
         if (statusText) {
-          statusText.textContent = this.enabled ? 'ON' : 'MUTED';
+          statusText.textContent = this.enabled ? 'ON (en-IN)' : 'MUTED';
           statusText.className = `text-[11px] font-mono font-bold ${this.enabled ? 'text-emerald-400' : 'text-zinc-500'}`;
         }
         if (icon) {
@@ -1220,23 +1243,75 @@
         }
       },
 
-      speakEvent(event) {
+      speakEvent(event, isManual = false) {
         if (!this.enabled || !('speechSynthesis' in window)) return;
         if (!event || !event.title) return;
 
+        // Automated Squawk Filters (when live incoming event arrives via WebSocket/SSE)
+        if (!isManual) {
+          // 1. Initial Page Boot Grace Period: Never squawk during the first 10 seconds of page load
+          if (Date.now() - pageLoadTime < 10000) {
+            return;
+          }
+
+          // 2. Strict Freshness Filter: NEVER squawk old events (older than 15 minutes / 900s)
+          const nowSec = Date.now() / 1000;
+          const pubEpoch = parseFloat(event.published_epoch || (new Date(event.published_at).getTime() / 1000) || 0);
+          if (pubEpoch > 0 && (nowSec - pubEpoch > 900)) {
+            console.log("[Voice Squawk] Skipped old historical event:", event.title);
+            return;
+          }
+
+          // 3. Severity Filter: Automated squawk ONLY for CRITICAL or HIGH impact (or explosive momentum)
+          const isCriticalOrHigh = event.severity === 'CRITICAL' || event.severity === 'HIGH';
+          const isExplosive = (event.potential_momentum || '').toLowerCase().includes('explosive');
+          if (!isCriticalOrHigh && !isExplosive) {
+            return;
+          }
+
+          // 4. Strict Deduplication: Never speak the same event ID twice
+          if (this.spokenIds.has(event.id)) {
+            return;
+          }
+          this.spokenIds.add(event.id);
+        }
+
+        // If a new high-priority alert arrives, immediately cancel any previous utterance
+        if ('speechSynthesis' in window && window.speechSynthesis.speaking) {
+          window.speechSynthesis.cancel();
+          this.queue = [];
+          this.speaking = false;
+        }
+
         const title = event.title.replace(/<[^>]+>/g, '').trim();
         const source = (event.source || 'Breaking Wire').replace('ForexFactory ', '');
-        const bias = (event.gold_bias || 'NEUTRAL').replace('_', ' ');
+        const bias = (event.gold_bias || 'NEUTRAL').replace(/_/g, ' ');
         const momentum = event.potential_momentum || 'Normal volatility';
-        const reason = (event.transmission_mechanism || '').replace(/<[^>]+>/g, '').slice(0, 150);
+        const reason = (event.transmission_mechanism || '').replace(/<[^>]+>/g, '').slice(0, 140);
 
-        const squawkScript = `Flash Gold Alert! ${event.severity || 'Market'} event from ${source}. ${title}. Gold bias: ${bias}, expected momentum: ${momentum}. Driver: ${reason}`;
+        // Fetch dynamic Overall Market Bias if present on screen
+        const statBadge = document.getElementById('stat-market-bias-badge');
+        const overallBiasText = statBadge ? statBadge.textContent.trim() : '';
+
+        let squawkScript = `Flash Gold Alert! ${event.severity || 'Market'} event from ${source}. ${title}. Gold bias: ${bias}. Expected momentum: ${momentum}.`;
+        if (overallBiasText) {
+          squawkScript += ` Overall market bias is ${overallBiasText}.`;
+        }
+        if (reason) {
+          squawkScript += ` Catalyst: ${reason}`;
+        }
+
         this.speakText(squawkScript);
       },
 
       speakText(text) {
         if (!this.enabled || !('speechSynthesis' in window) || !text) return;
-        this.queue.push(text);
+        // Never allow a giant backlog to pile up: replace queue with latest
+        if (this.queue.length > 0) {
+          this.queue = [text];
+        } else {
+          this.queue.push(text);
+        }
         this.processQueue();
       },
 
@@ -1247,10 +1322,13 @@
 
         const textToSpeak = this.queue.shift();
         const utterance = new SpeechSynthesisUtterance(textToSpeak);
+
+        // Set Indian English language tag and voice
+        utterance.lang = 'en-IN';
         if (this.selectedVoice) {
           utterance.voice = this.selectedVoice;
         }
-        utterance.rate = 1.05;
+        utterance.rate = 1.0;
         utterance.pitch = 1.0;
         utterance.volume = 1.0;
 
@@ -1278,7 +1356,7 @@
     function speakEventById(eventId) {
       const ev = allEvents.find(e => e.id === eventId);
       if (ev) {
-        voiceSquawk.speakEvent(ev);
+        voiceSquawk.speakEvent(ev, true);
       }
     }
 
