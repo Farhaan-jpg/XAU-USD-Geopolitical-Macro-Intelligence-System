@@ -40,7 +40,33 @@ logger = logging.getLogger("XAUUSD_Engine")
 DB_PATH = os.getenv("DB_PATH", "intelligence.db")
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "25"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "").strip()
+
+# Resilient Model Cascades for Automatic Fallbacks
+GROQ_CANDIDATE_MODELS = [m for m in [
+    GROQ_MODEL,
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "llama-3.1-70b-versatile",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+] if m]
+
+OPENAI_CANDIDATE_MODELS = [m for m in [
+    OPENAI_MODEL,
+    "gpt-4o-mini",
+    "gpt-3.5-turbo",
+    "gpt-4o",
+] if m]
+
+# Runtime working model cache
+_active_groq_model: Optional[str] = None
+_active_openai_model: Optional[str] = None
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 HOST = os.getenv("HOST", "0.0.0.0")
@@ -443,7 +469,8 @@ def heuristic_quant_analysis(title: str, summary: str, source: str) -> Dict[str,
         }
 
 async def call_groq_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
-    """Calls Groq Llama-3.3-70B API with JSON mode."""
+    """Calls Groq API with automatic cascading fallback across candidate models."""
+    global _active_groq_model
     if not GROQ_API_KEY:
         return None
 
@@ -453,32 +480,50 @@ async def call_groq_llm(title: str, summary: str, source: str) -> Optional[Dict[
         "Content-Type": "application/json",
     }
     user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": LLM_SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.1,
-        "max_tokens": 600,
-    }
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                raw_json = data["choices"][0]["message"]["content"]
-                return json.loads(raw_json)
-            else:
-                logger.warning("Groq API returned status %d: %s", resp.status_code, resp.text)
-    except Exception as e:
-        logger.error("Groq API call failed: %s", e)
+    models_to_try = [_active_groq_model] if _active_groq_model else []
+    for m in GROQ_CANDIDATE_MODELS:
+        if m not in models_to_try:
+            models_to_try.append(m)
+
+    for model_name in models_to_try:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": LLM_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+            "max_tokens": 600,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw_json = data["choices"][0]["message"]["content"]
+                    parsed = json.loads(raw_json)
+                    if _active_groq_model != model_name:
+                        logger.info("Groq model active & verified: %s", model_name)
+                        _active_groq_model = model_name
+                    return parsed
+                elif resp.status_code in [404, 400]:
+                    # Model not found or not supported on this tier -> try next model in fallback cascade
+                    logger.warning("Groq model '%s' unavailable (status %d). Automatically switching to fallback model...", model_name, resp.status_code)
+                    continue
+                else:
+                    logger.warning("Groq API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
+        except Exception as e:
+            logger.error("Groq API call error with model %s: %s", model_name, e)
+            continue
+
     return None
 
 async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
-    """Calls OpenAI gpt-4o-mini API as an alternative fallback."""
+    """Calls OpenAI API with automatic cascading fallback across candidate models."""
+    global _active_openai_model
     if not OPENAI_API_KEY:
         return None
 
@@ -488,28 +533,44 @@ async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dic
         "Content-Type": "application/json",
     }
     user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
-    payload = {
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": LLM_SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.1,
-        "max_tokens": 600,
-    }
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                raw_json = data["choices"][0]["message"]["content"]
-                return json.loads(raw_json)
-            else:
-                logger.warning("OpenAI API returned status %d: %s", resp.status_code, resp.text)
-    except Exception as e:
-        logger.error("OpenAI API call failed: %s", e)
+    models_to_try = [_active_openai_model] if _active_openai_model else []
+    for m in OPENAI_CANDIDATE_MODELS:
+        if m not in models_to_try:
+            models_to_try.append(m)
+
+    for model_name in models_to_try:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": LLM_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+            "max_tokens": 600,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw_json = data["choices"][0]["message"]["content"]
+                    parsed = json.loads(raw_json)
+                    if _active_openai_model != model_name:
+                        logger.info("OpenAI model active & verified: %s", model_name)
+                        _active_openai_model = model_name
+                    return parsed
+                elif resp.status_code in [404, 400]:
+                    logger.warning("OpenAI model '%s' unavailable (status %d). Automatically switching to fallback model...", model_name, resp.status_code)
+                    continue
+                else:
+                    logger.warning("OpenAI API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
+        except Exception as e:
+            logger.error("OpenAI API call error with model %s: %s", model_name, e)
+            continue
+
     return None
 
 async def analyze_headline(title: str, summary: str, source: str) -> Dict[str, Any]:
@@ -1070,9 +1131,10 @@ async def health_check():
         "last_poll_time": poller_state.last_poll_time,
         "total_processed_events": poller_state.total_processed_events,
         "active_sse_subscribers": len(hub.sse_subscribers),
-        "active_ws_subscribers": len(hub.ws_subscribers),
         "groq_configured": bool(GROQ_API_KEY),
+        "groq_active_model": _active_groq_model or (GROQ_CANDIDATE_MODELS[0] if GROQ_CANDIDATE_MODELS else None),
         "openai_configured": bool(OPENAI_API_KEY),
+        "openai_active_model": _active_openai_model or (OPENAI_CANDIDATE_MODELS[0] if OPENAI_CANDIDATE_MODELS else None),
         "telegram_configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
         "oanda_configured": bool(OANDA_API_KEY and OANDA_ACCOUNT_ID),
         "oanda_xauusd_price": poller_state.current_gold_price,

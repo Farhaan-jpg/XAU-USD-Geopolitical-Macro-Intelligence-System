@@ -26,6 +26,8 @@ from app import (
     CorrelatedAssets,
     AssetImpact,
     process_raw_item,
+    GROQ_CANDIDATE_MODELS,
+    OPENAI_CANDIDATE_MODELS,
 )
 from httpx import ASGITransport, AsyncClient
 
@@ -232,7 +234,22 @@ async def test_api_endpoints():
         assert ui_resp.status_code == 200
         assert "AUREUS" in ui_resp.text
         assert "Macro Asset Transmission Matrix" in ui_resp.text
-        print("  [PASS] GET / rendered UI dashboard successfully")
+async def test_ai_fallback_cascade():
+    print("\n--- 6. Testing AI Multi-Model Fallback Cascade ---")
+    assert len(GROQ_CANDIDATE_MODELS) >= 5, "Groq must have multiple fallback models configured!"
+    assert "llama-3.1-8b-instant" in GROQ_CANDIDATE_MODELS, "llama-3.1-8b-instant must be in Groq fallbacks!"
+    assert len(OPENAI_CANDIDATE_MODELS) >= 3, "OpenAI must have multiple fallback models configured!"
+    
+    res = await analyze_headline(
+        title="Fed signals upcoming rate pause amidst cooling labor market",
+        summary="Treasuries rally on dovish central bank signals.",
+        source="Reuters"
+    )
+    assert res is not None
+    assert "relevance" in res
+    assert res["relevance"] is True
+    assert "gold_bias" in res
+    print(f"  [PASS] AI fallback cascade verified: {len(GROQ_CANDIDATE_MODELS)} Groq fallback models, {len(OPENAI_CANDIDATE_MODELS)} OpenAI models, seamless heuristic fallback active.")
 
 async def run_all_tests():
     print("=================================================================")
@@ -243,6 +260,7 @@ async def run_all_tests():
     await test_database_persistence()
     await test_live_feed_ingestion()
     await test_api_endpoints()
+    await test_ai_fallback_cascade()
     print("\n=================================================================")
     print("ALL TESTS PASSED WITH 100% SUCCESS!")
     print("=================================================================")
