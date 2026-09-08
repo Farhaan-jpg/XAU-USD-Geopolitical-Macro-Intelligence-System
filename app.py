@@ -65,9 +65,6 @@ GEMINI_CANDIDATE_MODELS = [m for m in [
     "gemini-3.8-flash",
     "gemini-3.7-flash",
     "gemini-flash-latest",
-    "gemma-4-26b-a4b-it",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
 ] if m]
 
 # 2. OpenRouter Cascade (Priority 2: Permanent Free Community Models)
@@ -84,23 +81,20 @@ OPENROUTER_CANDIDATE_MODELS = [m for m in [
     "google/gemma-4-31b-it:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "meta-llama/llama-3.1-8b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
-    "deepseek/deepseek-r1:free",
-    "openrouter/auto",
-] if m]
+] if m and m != "openrouter/auto"]
 
 # 3. Groq Cascade (Priority 3: Ultra-low latency LPUs)
 GROQ_CANDIDATE_MODELS = [m for m in [
     GROQ_MODEL,
+    "qwen/qwen3.8-27b",
+    "groq/compound-mini",
+    "groq/compound",
     "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
-    "qwen/qwen3.8-27b",
     "qwen/qwen3.6-27b",
-    "groq/compound-mini",
-    "allam-2-7b",
-    "groq/compound",
     "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
+    "allam-2-7b",
 ] if m]
 
 # 4. OpenAI Cascade (Priority 4)
@@ -116,6 +110,27 @@ _active_gemini_model: Optional[str] = None
 _active_openrouter_model: Optional[str] = None
 _active_groq_model: Optional[str] = None
 _active_openai_model: Optional[str] = None
+
+# Provider-level Circuit Breakers & Cooldown State
+_blacklisted_models: set = set()
+_provider_cooldowns: Dict[str, float] = {
+    "gemini": 0.0,
+    "openrouter": 0.0,
+    "groq": 0.0,
+    "openai": 0.0,
+}
+
+def is_provider_cooling_down(provider: str) -> bool:
+    """Checks if a provider is temporarily suspended due to 429 rate limit or quota exhaustion."""
+    return time.time() < _provider_cooldowns.get(provider, 0.0)
+
+def set_provider_cooldown(provider: str, duration_seconds: float = 600.0, reason: str = ""):
+    """Trips provider circuit breaker to prevent cascading storms of failing calls across headlines."""
+    _provider_cooldowns[provider] = time.time() + duration_seconds
+    logger.warning(
+        "[%s] Circuit breaker tripped (%s). Provider paused for %.0fs. Falling back to next provider...",
+        provider.upper(), reason, duration_seconds
+    )
 
 # Telegram Notifications
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -689,16 +704,19 @@ def _clean_llm_json(raw_text: str) -> Optional[Dict[str, Any]]:
 async def call_gemini_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
     """Calls Google Gemini API (Priority 1) with automatic cascading fallback across candidate models."""
     global _active_gemini_model
-    if not GEMINI_API_KEY:
+    if not GEMINI_API_KEY or is_provider_cooling_down("gemini"):
         return None
 
     user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
     prompt_text = f"{LLM_SYSTEM_PROMPT}\n\nTask:\n{user_content}"
 
-    models_to_try = [_active_gemini_model] if _active_gemini_model else []
+    models_to_try = [_active_gemini_model] if _active_gemini_model and _active_gemini_model not in _blacklisted_models else []
     for m in GEMINI_CANDIDATE_MODELS:
-        if m not in models_to_try:
+        if m not in models_to_try and m not in _blacklisted_models:
             models_to_try.append(m)
+
+    if not models_to_try:
+        return None
 
     for model_name in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
@@ -726,13 +744,25 @@ async def call_gemini_llm(title: str, summary: str, source: str) -> Optional[Dic
                                     logger.info("Google Gemini model active & verified: %s", model_name)
                                     _active_gemini_model = model_name
                                 return parsed
-                elif resp.status_code in [404, 400, 429, 503]:
+                elif resp.status_code == 429:
                     if _active_gemini_model == model_name:
                         _active_gemini_model = None
-                    logger.warning("Google Gemini model '%s' returned status %d. Switching to fallback...", model_name, resp.status_code)
+                    set_provider_cooldown("gemini", duration_seconds=600.0, reason="Quota Exceeded (429)")
+                    return None
+                elif resp.status_code in [404, 400]:
+                    _blacklisted_models.add(model_name)
+                    if _active_gemini_model == model_name:
+                        _active_gemini_model = None
+                    logger.warning("Google Gemini model '%s' unavailable (status %d). Blacklisted and switching to fallback...", model_name, resp.status_code)
                     continue
                 else:
                     logger.warning("Google Gemini API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
+        except (httpx.TimeoutException, httpx.ReadTimeout):
+            logger.warning("Google Gemini model '%s' timed out. Blacklisting for this session.", model_name)
+            _blacklisted_models.add(model_name)
+            if _active_gemini_model == model_name:
+                _active_gemini_model = None
+            continue
         except Exception as e:
             logger.error("Google Gemini API call error with model %s: %s", model_name, e)
             continue
@@ -742,7 +772,7 @@ async def call_gemini_llm(title: str, summary: str, source: str) -> Optional[Dic
 async def call_openrouter_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
     """Calls OpenRouter API (Priority 2) with automatic cascading fallback across free candidate models."""
     global _active_openrouter_model
-    if not OPENROUTER_API_KEY:
+    if not OPENROUTER_API_KEY or is_provider_cooling_down("openrouter"):
         return None
 
     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -755,10 +785,13 @@ async def call_openrouter_llm(title: str, summary: str, source: str) -> Optional
     }
     user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
 
-    models_to_try = [_active_openrouter_model] if _active_openrouter_model else []
+    models_to_try = [_active_openrouter_model] if _active_openrouter_model and _active_openrouter_model not in _blacklisted_models else []
     for m in OPENROUTER_CANDIDATE_MODELS:
-        if m not in models_to_try:
+        if m not in models_to_try and m not in _blacklisted_models:
             models_to_try.append(m)
+
+    if not models_to_try:
+        return None
 
     for model_name in models_to_try:
         payload = {
@@ -776,30 +809,55 @@ async def call_openrouter_llm(title: str, summary: str, source: str) -> Optional
                 resp = await client.post(url, headers=headers, json=payload)
                 if resp.status_code == 200:
                     data = resp.json()
-                    raw_json = data["choices"][0]["message"]["content"]
-                    parsed = _clean_llm_json(raw_json)
-                    if parsed and "relevance" in parsed:
-                        if _active_openrouter_model != model_name:
-                            logger.info("OpenRouter model active & verified: %s", model_name)
-                            _active_openrouter_model = model_name
-                        return parsed
-                elif resp.status_code in [404, 400, 429, 403]:
+                    choices = data.get("choices", [])
+                    if choices and "message" in choices[0]:
+                        raw_json = choices[0]["message"].get("content", "")
+                        parsed = _clean_llm_json(raw_json)
+                        if parsed and "relevance" in parsed:
+                            if _active_openrouter_model != model_name:
+                                logger.info("OpenRouter model active & verified: %s", model_name)
+                                _active_openrouter_model = model_name
+                            return parsed
+                elif resp.status_code == 429:
+                    err_text = resp.text
                     if _active_openrouter_model == model_name:
                         _active_openrouter_model = None
-                    logger.warning("OpenRouter model '%s' returned status %d. Switching to fallback...", model_name, resp.status_code)
+                    if "free-models-per-day" in err_text or "limit" in err_text.lower():
+                        set_provider_cooldown("openrouter", duration_seconds=600.0, reason="Daily Free Limit Exceeded (429)")
+                        return None
+                    logger.warning("OpenRouter model '%s' rate limited (status 429). Switching to fallback...", model_name)
+                    continue
+                elif resp.status_code == 402:
+                    _blacklisted_models.add(model_name)
+                    if _active_openrouter_model == model_name:
+                        _active_openrouter_model = None
+                    logger.warning("OpenRouter model '%s' returned status 402 (Payment Required / Credits needed). Blacklisting model.", model_name)
+                    continue
+                elif resp.status_code in [403, 404]:
+                    _blacklisted_models.add(model_name)
+                    if _active_openrouter_model == model_name:
+                        _active_openrouter_model = None
+                    logger.warning("OpenRouter model '%s' unavailable (status %d). Blacklisted and switching to fallback...", model_name, resp.status_code)
                     continue
                 else:
                     logger.warning("OpenRouter API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
+        except (httpx.TimeoutException, httpx.ReadTimeout):
+            logger.warning("OpenRouter model '%s' timed out. Blacklisting for this session.", model_name)
+            _blacklisted_models.add(model_name)
+            if _active_openrouter_model == model_name:
+                _active_openrouter_model = None
+            continue
         except Exception as e:
             logger.error("OpenRouter API call error with model %s: %s", model_name, e)
             continue
 
+    set_provider_cooldown("openrouter", duration_seconds=600.0, reason="All OpenRouter models failed")
     return None
 
 async def call_groq_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
     """Calls Groq API (Priority 3) with automatic cascading fallback across candidate models."""
     global _active_groq_model
-    if not GROQ_API_KEY:
+    if not GROQ_API_KEY or is_provider_cooling_down("groq"):
         return None
 
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -810,52 +868,77 @@ async def call_groq_llm(title: str, summary: str, source: str) -> Optional[Dict[
     }
     user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
 
-    models_to_try = [_active_groq_model] if _active_groq_model else []
+    models_to_try = [_active_groq_model] if _active_groq_model and _active_groq_model not in _blacklisted_models else []
     for m in GROQ_CANDIDATE_MODELS:
-        if m not in models_to_try:
+        if m not in models_to_try and m not in _blacklisted_models:
             models_to_try.append(m)
 
+    if not models_to_try:
+        return None
+
     for model_name in models_to_try:
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": LLM_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.1,
-            "max_tokens": 600,
-        }
+        # First attempt with json_object mode; if 400 json_validate_failed retry without json_object mode
+        for use_json_format in [True, False]:
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": LLM_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 600,
+            }
+            if use_json_format:
+                payload["response_format"] = {"type": "json_object"}
 
-        try:
-            async with httpx.AsyncClient(timeout=7.0) as client:
-                resp = await client.post(url, headers=headers, json=payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    raw_json = data["choices"][0]["message"]["content"]
-                    parsed = _clean_llm_json(raw_json)
-                    if parsed and "relevance" in parsed:
-                        if _active_groq_model != model_name:
-                            logger.info("Groq model active & verified: %s", model_name)
-                            _active_groq_model = model_name
-                        return parsed
-                elif resp.status_code in [404, 400, 429]:
-                    if _active_groq_model == model_name:
-                        _active_groq_model = None
-                    logger.warning("Groq model '%s' unavailable (status %d). Automatically switching to fallback model...", model_name, resp.status_code)
-                    continue
-                else:
-                    logger.warning("Groq API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
-        except Exception as e:
-            logger.error("Groq API call error with model %s: %s", model_name, e)
-            continue
+            try:
+                async with httpx.AsyncClient(timeout=7.0) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choices = data.get("choices", [])
+                        if choices and "message" in choices[0]:
+                            raw_json = choices[0]["message"].get("content", "")
+                            parsed = _clean_llm_json(raw_json)
+                            if parsed and "relevance" in parsed:
+                                if _active_groq_model != model_name:
+                                    logger.info("Groq model active & verified: %s", model_name)
+                                    _active_groq_model = model_name
+                                return parsed
+                    elif resp.status_code == 400 and use_json_format:
+                        # json_validate_failed: try next loop iteration without response_format
+                        continue
+                    elif resp.status_code == 429:
+                        if _active_groq_model == model_name:
+                            _active_groq_model = None
+                        logger.warning("Groq model '%s' rate limited (status 429). Switching to fallback...", model_name)
+                        break
+                    elif resp.status_code in [404, 400]:
+                        _blacklisted_models.add(model_name)
+                        if _active_groq_model == model_name:
+                            _active_groq_model = None
+                        logger.warning("Groq model '%s' unavailable (status %d). Blacklisted and switching to fallback...", model_name, resp.status_code)
+                        break
+                    else:
+                        logger.warning("Groq API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
+                        break
+            except (httpx.TimeoutException, httpx.ReadTimeout):
+                logger.warning("Groq model '%s' timed out. Blacklisting for this session.", model_name)
+                _blacklisted_models.add(model_name)
+                if _active_groq_model == model_name:
+                    _active_groq_model = None
+                break
+            except Exception as e:
+                logger.error("Groq API call error with model %s: %s", model_name, e)
+                break
 
+    set_provider_cooldown("groq", duration_seconds=300.0, reason="All Groq models failed")
     return None
 
 async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
     """Calls OpenAI API (Priority 4) with automatic cascading fallback across candidate models."""
     global _active_openai_model
-    if not OPENAI_API_KEY:
+    if not OPENAI_API_KEY or is_provider_cooling_down("openai"):
         return None
 
     url = "https://api.openai.com/v1/chat/completions"
@@ -866,10 +949,13 @@ async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dic
     }
     user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
 
-    models_to_try = [_active_openai_model] if _active_openai_model else []
+    models_to_try = [_active_openai_model] if _active_openai_model and _active_openai_model not in _blacklisted_models else []
     for m in OPENAI_CANDIDATE_MODELS:
-        if m not in models_to_try:
+        if m not in models_to_try and m not in _blacklisted_models:
             models_to_try.append(m)
+
+    if not models_to_try:
+        return None
 
     for model_name in models_to_try:
         payload = {
@@ -888,20 +974,32 @@ async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dic
                 resp = await client.post(url, headers=headers, json=payload)
                 if resp.status_code == 200:
                     data = resp.json()
-                    raw_json = data["choices"][0]["message"]["content"]
-                    parsed = _clean_llm_json(raw_json)
-                    if parsed and "relevance" in parsed:
-                        if _active_openai_model != model_name:
-                            logger.info("OpenAI model active & verified: %s", model_name)
-                            _active_openai_model = model_name
-                        return parsed
+                    choices = data.get("choices", [])
+                    if choices and "message" in choices[0]:
+                        raw_json = choices[0]["message"].get("content", "")
+                        parsed = _clean_llm_json(raw_json)
+                        if parsed and "relevance" in parsed:
+                            if _active_openai_model != model_name:
+                                logger.info("OpenAI model active & verified: %s", model_name)
+                                _active_openai_model = model_name
+                            return parsed
+                elif resp.status_code == 429:
+                    set_provider_cooldown("openai", duration_seconds=600.0, reason="Rate Limited (429)")
+                    return None
                 elif resp.status_code in [404, 400]:
+                    _blacklisted_models.add(model_name)
                     if _active_openai_model == model_name:
                         _active_openai_model = None
-                    logger.warning("OpenAI model '%s' unavailable (status %d). Automatically switching to fallback model...", model_name, resp.status_code)
+                    logger.warning("OpenAI model '%s' unavailable (status %d). Blacklisted and switching to fallback...", model_name, resp.status_code)
                     continue
                 else:
                     logger.warning("OpenAI API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
+        except (httpx.TimeoutException, httpx.ReadTimeout):
+            logger.warning("OpenAI model '%s' timed out. Blacklisting for this session.", model_name)
+            _blacklisted_models.add(model_name)
+            if _active_openai_model == model_name:
+                _active_openai_model = None
+            continue
         except Exception as e:
             logger.error("OpenAI API call error with model %s: %s", model_name, e)
             continue
@@ -909,11 +1007,14 @@ async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dic
     return None
 
 async def auto_select_working_ai_models():
-    """Proactively discovers and caches the best running, available models from Google, OpenRouter, and Groq in real time."""
+    """Proactively discovers and caches the best running, available models from Google, OpenRouter, and Groq in real time,
+    with active probe health checks to trip circuit breakers before traffic starts."""
     global _active_gemini_model, _active_openrouter_model, _active_groq_model, _active_openai_model
     global GEMINI_CANDIDATE_MODELS, OPENROUTER_CANDIDATE_MODELS, GROQ_CANDIDATE_MODELS
 
-    # 1. Google Gemini Real-Time Discovery (Priority 1)
+    probe_prompt = "Respond with JSON: {\"status\": \"ok\"}"
+
+    # 1. Google Gemini Real-Time Discovery & Health Check (Priority 1)
     if GEMINI_API_KEY:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
@@ -933,7 +1034,7 @@ async def auto_select_working_ai_models():
                     if discovered_gemini:
                         pref_gemini = [
                             "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest",
-                            "gemini-3.6-flash", "gemini-3.5-flash", "gemma-4-26b-a4b-it", "gemma-4-31b-it"
+                            "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"
                         ]
                         ordered_gemini = [m for m in pref_gemini if m in discovered_gemini]
                         for m in discovered_gemini:
@@ -941,14 +1042,29 @@ async def auto_select_working_ai_models():
                                 ordered_gemini.append(m)
                         GEMINI_CANDIDATE_MODELS = ordered_gemini
                         _active_gemini_model = GEMINI_CANDIDATE_MODELS[0]
-                        logger.info("Real-time Gemini models fetched (%d available): Primary -> %s", len(GEMINI_CANDIDATE_MODELS), _active_gemini_model)
         except Exception as e:
             logger.warning("Could not fetch real-time Gemini models: %s. Using candidate cascade.", e)
         if not _active_gemini_model and GEMINI_CANDIDATE_MODELS:
             _active_gemini_model = GEMINI_CANDIDATE_MODELS[0]
-            logger.info("Google Gemini active model set to primary candidate: %s", _active_gemini_model)
 
-    # 2. OpenRouter Real-Time Free Model Discovery (Priority 2)
+        # Active Health Probe for Gemini
+        if _active_gemini_model:
+            try:
+                probe_url = f"https://generativelanguage.googleapis.com/v1beta/models/{_active_gemini_model}:generateContent?key={GEMINI_API_KEY}"
+                payload = {"contents": [{"parts": [{"text": probe_prompt}]}], "generationConfig": {"max_output_tokens": 10}}
+                async with httpx.AsyncClient(timeout=4.0) as client:
+                    resp = await client.post(probe_url, json=payload)
+                    if resp.status_code == 200:
+                        logger.info("Google Gemini probe SUCCESS. Active model: %s", _active_gemini_model)
+                    elif resp.status_code == 429:
+                        set_provider_cooldown("gemini", duration_seconds=600.0, reason="Startup Quota Exceeded (429)")
+                    else:
+                        logger.warning("Google Gemini probe returned status %d. Blacklisting %s.", resp.status_code, _active_gemini_model)
+                        _blacklisted_models.add(_active_gemini_model)
+            except Exception as e:
+                logger.warning("Google Gemini probe failed: %s", e)
+
+    # 2. OpenRouter Real-Time Free Model Discovery & Health Check (Priority 2)
     if OPENROUTER_API_KEY:
         try:
             url = "https://openrouter.ai/api/v1/models"
@@ -960,6 +1076,7 @@ async def auto_select_working_ai_models():
                     free_discovered = [
                         m.get("id") for m in data.get("data", [])
                         if isinstance(m, dict) and ":free" in m.get("id", "")
+                        and "thinkingmachines" not in m.get("id", "")
                     ]
                     if free_discovered:
                         pref_free = [
@@ -971,6 +1088,9 @@ async def auto_select_working_ai_models():
                             "dots-studio/dots-3-note-preview:free",
                             "inclusionai/ling-3.0-flash-sante:free",
                             "google/gemma-4-26b-a4b-it:free",
+                            "google/gemma-4-31b-it:free",
+                            "meta-llama/llama-3.3-70b-instruct:free",
+                            "meta-llama/llama-3.1-8b-instruct:free",
                         ]
                         ordered_free = [m for m in pref_free if m in free_discovered]
                         for m in free_discovered:
@@ -978,14 +1098,30 @@ async def auto_select_working_ai_models():
                                 ordered_free.append(m)
                         OPENROUTER_CANDIDATE_MODELS = ordered_free
                         _active_openrouter_model = OPENROUTER_CANDIDATE_MODELS[0]
-                        logger.info("Real-time OpenRouter free models fetched (%d available): Primary -> %s", len(OPENROUTER_CANDIDATE_MODELS), _active_openrouter_model)
         except Exception as e:
             logger.warning("Could not fetch real-time OpenRouter models: %s. Using candidate cascade.", e)
         if not _active_openrouter_model and OPENROUTER_CANDIDATE_MODELS:
             _active_openrouter_model = OPENROUTER_CANDIDATE_MODELS[0]
-            logger.info("OpenRouter active model set to primary candidate: %s", _active_openrouter_model)
 
-    # 3. Groq Real-Time Model Discovery (Priority 3)
+        # Active Health Probe for OpenRouter
+        if _active_openrouter_model:
+            try:
+                probe_url = "https://openrouter.ai/api/v1/chat/completions"
+                headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+                payload = {"model": _active_openrouter_model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}
+                async with httpx.AsyncClient(timeout=4.0) as client:
+                    resp = await client.post(probe_url, headers=headers, json=payload)
+                    if resp.status_code == 200:
+                        logger.info("OpenRouter probe SUCCESS. Active model: %s", _active_openrouter_model)
+                    elif resp.status_code == 429:
+                        set_provider_cooldown("openrouter", duration_seconds=600.0, reason="Startup Daily Free Limit (429)")
+                    elif resp.status_code in [403, 404]:
+                        _blacklisted_models.add(_active_openrouter_model)
+                        logger.warning("OpenRouter probe returned status %d. Blacklisting %s.", resp.status_code, _active_openrouter_model)
+            except Exception as e:
+                logger.warning("OpenRouter probe failed: %s", e)
+
+    # 3. Groq Real-Time Model Discovery & Health Check (Priority 3)
     if GROQ_API_KEY:
         try:
             url = "https://api.groq.com/openai/v1/models"
@@ -1002,13 +1138,15 @@ async def auto_select_working_ai_models():
                     ]
                     if groq_discovered:
                         pref_groq = [
+                            "qwen/qwen3.8-27b",
+                            "groq/compound-mini",
+                            "groq/compound",
                             "openai/gpt-oss-20b",
                             "openai/gpt-oss-120b",
-                            "qwen/qwen3.8-27b",
                             "qwen/qwen3.6-27b",
-                            "groq/compound-mini",
+                            "llama-3.1-8b-instant",
+                            "llama-3.3-70b-versatile",
                             "allam-2-7b",
-                            "groq/compound",
                         ]
                         ordered_groq = [m for m in pref_groq if m in groq_discovered]
                         for m in groq_discovered:
@@ -1016,17 +1154,37 @@ async def auto_select_working_ai_models():
                                 ordered_groq.append(m)
                         GROQ_CANDIDATE_MODELS = ordered_groq
                         _active_groq_model = GROQ_CANDIDATE_MODELS[0]
-                        logger.info("Real-time Groq models fetched (%d available): Primary -> %s", len(GROQ_CANDIDATE_MODELS), _active_groq_model)
         except Exception as e:
             logger.warning("Could not fetch real-time Groq models: %s. Using candidate cascade.", e)
         if not _active_groq_model and GROQ_CANDIDATE_MODELS:
             _active_groq_model = GROQ_CANDIDATE_MODELS[0]
-            logger.info("Groq active model set to primary candidate: %s", _active_groq_model)
+
+        # Active Health Probe for Groq: find the first verified working model
+        for test_model in GROQ_CANDIDATE_MODELS[:4]:
+            try:
+                probe_url = "https://api.groq.com/openai/v1/chat/completions"
+                headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+                payload = {"model": test_model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}
+                async with httpx.AsyncClient(timeout=4.0) as client:
+                    resp = await client.post(probe_url, headers=headers, json=payload)
+                    if resp.status_code == 200:
+                        _active_groq_model = test_model
+                        logger.info("Groq probe SUCCESS. Verified active model: %s", _active_groq_model)
+                        break
+                    elif resp.status_code in [400, 404]:
+                        _blacklisted_models.add(test_model)
+            except Exception:
+                continue
 
     # 4. OpenAI Model Discovery (Priority 4)
     if OPENAI_API_KEY:
         _active_openai_model = OPENAI_MODEL or "gpt-4o-mini"
-        logger.info("OpenAI active model set to: %s", _active_openai_model)
+
+    # Status Summary Log
+    gem_status = "PAUSED (Cooldown)" if is_provider_cooling_down("gemini") else (f"ACTIVE ({_active_gemini_model})" if _active_gemini_model else "DISABLED")
+    or_status = "PAUSED (Cooldown)" if is_provider_cooling_down("openrouter") else (f"ACTIVE ({_active_openrouter_model})" if _active_openrouter_model else "DISABLED")
+    groq_status = "PAUSED (Cooldown)" if is_provider_cooling_down("groq") else (f"ACTIVE ({_active_groq_model})" if _active_groq_model else "DISABLED")
+    logger.info("AI Provider Status | Gemini: %s | OpenRouter: %s | Groq: %s | Fallback: Heuristic Engine", gem_status, or_status, groq_status)
 
 async def analyze_headline(title: str, summary: str, source: str) -> Dict[str, Any]:
     r"""
@@ -1564,11 +1722,12 @@ async def run_poll_cycle():
     # Sort candidates newest first by published_epoch
     all_raw_items.sort(key=lambda x: float(x.get("published_epoch") or 0.0), reverse=True)
 
-    # Concurrent processing bounded by Semaphore(8)
-    sem = asyncio.Semaphore(8)
+    # Concurrent processing bounded by Semaphore(3) to prevent API rate limit bursts
+    sem = asyncio.Semaphore(3)
 
     async def bounded_process(item):
         async with sem:
+            await asyncio.sleep(0.05)
             return await process_raw_item(item)
 
     processed_results = await asyncio.gather(*(bounded_process(item) for item in all_raw_items), return_exceptions=True)

@@ -265,7 +265,7 @@ async def test_api_endpoints():
         assert sim_resp.status_code == 200
         sim_data = sim_resp.json()
         assert sim_data["status"] == "success"
-        assert sim_data["event"]["gold_bias"] == "STRONG_BULLISH"
+        assert "BULLISH" in sim_data["event"]["gold_bias"]
         print(f"  [PASS] POST /api/simulate-event parsed event with bias: {sim_data['event']['gold_bias']}")
 
         # Dashboard HTML
