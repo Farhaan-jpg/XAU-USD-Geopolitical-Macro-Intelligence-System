@@ -74,6 +74,7 @@ class IntelligenceEvent(BaseModel):
     link: str
     published_at: str
     published_epoch: float = Field(default_factory=lambda: time.time())
+    is_upcoming: bool = False
     relevance: bool = True
     severity: str = Field(..., description="CRITICAL | HIGH | MEDIUM | LOW")
     gold_bias: str = Field(..., description="STRONG_BULLISH | BULLISH | NEUTRAL | BEARISH | STRONG_BEARISH")
@@ -105,6 +106,7 @@ async def init_db():
                 link TEXT,
                 published_at TEXT,
                 published_epoch REAL,
+                is_upcoming INTEGER DEFAULT 0,
                 relevance INTEGER NOT NULL,
                 severity TEXT NOT NULL,
                 gold_bias TEXT NOT NULL,
@@ -114,26 +116,31 @@ async def init_db():
                 created_at TEXT NOT NULL
             );
         """)
-        # Migration check: if column published_epoch is missing in existing table
+        # Migration check: if column published_epoch or is_upcoming is missing in existing table
         try:
             await db.execute("ALTER TABLE events ADD COLUMN published_epoch REAL DEFAULT 0.0;")
         except Exception:
             pass  # Already exists
+        try:
+            await db.execute("ALTER TABLE events ADD COLUMN is_upcoming INTEGER DEFAULT 0;")
+        except Exception:
+            pass
 
         await db.execute("CREATE INDEX IF NOT EXISTS idx_events_epoch ON events(published_epoch DESC);")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_events_upcoming ON events(is_upcoming, published_epoch);")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);")
         await db.commit()
     logger.info("SQLite persistence initialized at %s with WAL mode & epoch index.", DB_PATH)
 
 async def store_event(event: IntelligenceEvent):
-    """Persists a parsed intelligence event with numerical epoch timestamp."""
+    """Persists a parsed intelligence event with numerical epoch timestamp and upcoming flag."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             INSERT OR REPLACE INTO events (
-                id, source, title, summary, link, published_at, published_epoch,
+                id, source, title, summary, link, published_at, published_epoch, is_upcoming,
                 relevance, severity, gold_bias, potential_momentum,
                 transmission_mechanism, correlated_assets_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             event.id,
             event.source,
@@ -142,6 +149,7 @@ async def store_event(event: IntelligenceEvent):
             event.link,
             event.published_at,
             event.published_epoch,
+            1 if event.is_upcoming else 0,
             1 if event.relevance else 0,
             event.severity,
             event.gold_bias,
@@ -154,24 +162,58 @@ async def store_event(event: IntelligenceEvent):
 
 async def get_recent_events(limit: int = 50) -> List[Dict[str, Any]]:
     """
-    Retrieves events strictly ordered by published_epoch DESC, created_at DESC
+    Retrieves released/breaking events strictly ordered by published_epoch DESC, created_at DESC
     so the newest published news is ALWAYS on top!
+    Excludes future scheduled events (which are served in upcoming calendar).
     """
+    now = time.time()
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM events ORDER BY published_epoch DESC, created_at DESC LIMIT ?", (limit,)
+            """SELECT * FROM events 
+               WHERE is_upcoming = 0 OR published_epoch <= ? 
+               ORDER BY published_epoch DESC, created_at DESC 
+               LIMIT ?""",
+            (now + 60, limit)
         ) as cursor:
             rows = await cursor.fetchall()
             results = []
             for row in rows:
                 item = dict(row)
                 item["relevance"] = bool(item["relevance"])
+                item["is_upcoming"] = bool(item.get("is_upcoming", 0))
                 if not item.get("published_epoch"):
                     try:
                         item["published_epoch"] = datetime.fromisoformat(item["published_at"]).timestamp()
                     except Exception:
                         item["published_epoch"] = time.time()
+                try:
+                    item["correlated_assets_impact"] = json.loads(item["correlated_assets_json"])
+                except Exception:
+                    item["correlated_assets_impact"] = {}
+                results.append(item)
+            return results
+
+async def get_upcoming_calendar(limit: int = 15) -> List[Dict[str, Any]]:
+    """
+    Retrieves upcoming scheduled economic releases ordered chronologically ascending (nearest event first).
+    """
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM events 
+               WHERE (is_upcoming = 1 OR published_epoch > ?) 
+               ORDER BY published_epoch ASC 
+               LIMIT ?""",
+            (now, limit)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            results = []
+            for row in rows:
+                item = dict(row)
+                item["relevance"] = bool(item["relevance"])
+                item["is_upcoming"] = True
                 try:
                     item["correlated_assets_impact"] = json.loads(item["correlated_assets_json"])
                 except Exception:
@@ -626,10 +668,10 @@ async def fetch_economic_calendar() -> List[Dict[str, Any]]:
                     
                     try:
                         cal_epoch = datetime.fromisoformat(date_str).timestamp()
-                        if cal_epoch > now:
-                            cal_epoch = now
+                        is_upcoming = cal_epoch > now
                     except Exception:
-                        cal_epoch = now
+                        cal_epoch = time.time()
+                        is_upcoming = False
 
                     items.append({
                         "id": event_id,
@@ -639,6 +681,7 @@ async def fetch_economic_calendar() -> List[Dict[str, Any]]:
                         "link": link,
                         "published_at": date_str,
                         "published_epoch": cal_epoch,
+                        "is_upcoming": is_upcoming,
                     })
             
             if items:
@@ -846,6 +889,7 @@ async def process_raw_item(raw: Dict[str, Any]) -> Optional[IntelligenceEvent]:
         link=raw.get("link", ""),
         published_at=raw.get("published_at", datetime.now(timezone.utc).isoformat()),
         published_epoch=float(raw.get("published_epoch") or time.time()),
+        is_upcoming=bool(raw.get("is_upcoming", False)),
         relevance=True,
         severity=analysis.get("severity", "LOW"),
         gold_bias=analysis.get("gold_bias", "NEUTRAL"),
@@ -1036,9 +1080,20 @@ async def health_check():
 
 @app.get("/api/events")
 async def get_events(limit: int = 50):
-    """Returns the last N processed intelligence events (ordered newest first)."""
+    """Returns breaking news (strictly newest first) and upcoming high-impact calendar releases."""
     events = await get_recent_events(limit=limit)
-    return {"events": events, "count": len(events)}
+    upcoming = await get_upcoming_calendar(limit=12)
+    return {
+        "events": events,
+        "upcoming_calendar": upcoming,
+        "count": len(events)
+    }
+
+@app.get("/api/calendar/upcoming")
+async def get_calendar():
+    """Returns upcoming high-impact economic releases (nearest event first)."""
+    upcoming = await get_upcoming_calendar(limit=15)
+    return {"upcoming": upcoming, "count": len(upcoming)}
 
 @app.get("/api/stats")
 async def get_stats():
