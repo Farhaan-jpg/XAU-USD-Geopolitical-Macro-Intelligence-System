@@ -428,6 +428,19 @@
 
         <!-- Action Controls & Badges -->
         <div class="flex flex-wrap items-center gap-2">
+          <!-- Timeframe Selector Tabs (Default 5M matching TradingView chart) -->
+          <div class="flex items-center bg-zinc-900/90 p-0.5 rounded-lg border border-zinc-700/80 text-xs font-mono">
+            <button id="tf-btn-5m" onclick="setLiquidityTimeframe('5m')" class="px-2.5 py-1 rounded font-bold transition-all bg-gold-accent/20 text-gold-accent border border-gold-accent/40 shadow-xs" title="5-Minute (Matches TradingView Chart)">
+              5M <span class="text-[9px] opacity-75">(Chart)</span>
+            </button>
+            <button id="tf-btn-15m" onclick="setLiquidityTimeframe('15m')" class="px-2.5 py-1 rounded font-medium text-zinc-400 hover:text-zinc-200 transition-all" title="15-Minute Macro Session">
+              15M
+            </button>
+            <button id="tf-btn-1h" onclick="setLiquidityTimeframe('1h')" class="px-2.5 py-1 rounded font-medium text-zinc-400 hover:text-zinc-200 transition-all" title="1-Hour Swing Profile">
+              1H
+            </button>
+          </div>
+
           <span id="liquidity-trend-pill" class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-zinc-800 text-zinc-300 border border-zinc-700 flex items-center gap-1.5">
             <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
             <span>Calculating Trend...</span>
@@ -1801,10 +1814,27 @@
     // =========================================================================
 
     let currentLiquidityProfile = null;
+    let selectedLiquidityTimeframe = '5m';
+
+    function setLiquidityTimeframe(tf) {
+      selectedLiquidityTimeframe = tf;
+      ['5m', '15m', '1h'].forEach(t => {
+        const btn = document.getElementById(`tf-btn-${t}`);
+        if (btn) {
+          if (t === tf) {
+            btn.className = 'px-2.5 py-1 rounded font-bold transition-all bg-gold-accent/20 text-gold-accent border border-gold-accent/40 shadow-xs';
+          } else {
+            btn.className = 'px-2.5 py-1 rounded font-medium text-zinc-400 hover:text-zinc-200 transition-all';
+          }
+        }
+      });
+      fetchLiquidityProfile(true);
+    }
 
     async function fetchLiquidityProfile(forceRefresh = false) {
       try {
-        const res = await fetch('/api/liquidity/profile');
+        const url = `/api/liquidity/profile?timeframe=${encodeURIComponent(selectedLiquidityTimeframe)}${forceRefresh ? '&force=true' : ''}`;
+        const res = await fetch(url);
         if (res.ok) {
           const profile = await res.json();
           renderLiquidityProfile(profile);

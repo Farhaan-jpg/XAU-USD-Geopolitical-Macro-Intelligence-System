@@ -774,14 +774,19 @@ def serialize_liquidity_profile(profile: LiquidityProfileResult) -> Dict[str, An
         "distance_to_nearest_resistance": profile.distance_to_nearest_resistance,
     }
 
-async def refresh_liquidity_profile():
+DEFAULT_TIMEFRAME = os.getenv("DEFAULT_TIMEFRAME", "5m").strip().lower()
+_current_timeframe: str = DEFAULT_TIMEFRAME
+
+async def refresh_liquidity_profile(timeframe: Optional[str] = None):
     """Fetches latest candle bars and recomputes the 300-bar liquidity heatmap profile."""
-    global _latest_liquidity_profile
+    global _latest_liquidity_profile, _current_timeframe
+    tf = (timeframe or _current_timeframe).strip().lower()
+    _current_timeframe = tf
     try:
         current_price = poller_state.current_gold_price
         bars = await fetch_ohlcv_bars(
             lookback=DEFAULT_LOOKBACK,
-            timeframe="15m",
+            timeframe=tf,
             oanda_api_key=OANDA_API_KEY,
             oanda_account_id=OANDA_ACCOUNT_ID,
             oanda_env=OANDA_ENVIRONMENT,
@@ -791,11 +796,13 @@ async def refresh_liquidity_profile():
             async with _liquidity_lock:
                 profile = liquidity_engine.compute(bars, current_spot_price=current_price)
                 _latest_liquidity_profile = profile
-            logger.info("Liquidity HeatMap Profile updated: POC=$%.2f, Zones=%d, Trend=%s",
-                        profile.poc_price, len(profile.all_active_zones), profile.trend_label)
-            await hub.broadcast("liquidity_profile", serialize_liquidity_profile(profile))
+            logger.info("Liquidity HeatMap Profile updated [%s]: POC=$%.2f, Zones=%d, Trend=%s",
+                        tf.upper(), profile.poc_price, len(profile.all_active_zones), profile.trend_label)
+            serialized = serialize_liquidity_profile(profile)
+            serialized["timeframe"] = tf
+            await hub.broadcast("liquidity_profile", serialized)
     except Exception as e:
-        logger.warning("Error refreshing liquidity profile: %s", e)
+        logger.warning("Error refreshing liquidity profile (%s): %s", tf, e)
 
 async def periodic_liquidity_profile_updater_task():
     """Background task refreshing the liquidity heatmap profile every 60 seconds."""
@@ -2348,21 +2355,25 @@ async def stream_events(request: Request):
 # ---------------------------------------------------------------------------
 
 @app.get("/api/liquidity/profile")
-async def get_liquidity_profile():
-    """Returns the full 300-bar Dynamic Liquidity HeatMap Profile."""
-    global _latest_liquidity_profile
-    if not _latest_liquidity_profile:
-        await refresh_liquidity_profile()
+async def get_liquidity_profile(timeframe: Optional[str] = None, force: bool = False):
+    """Returns the full 300-bar Dynamic Liquidity HeatMap Profile for the requested timeframe."""
+    global _latest_liquidity_profile, _current_timeframe
+    requested_tf = (timeframe or _current_timeframe).strip().lower()
+    if force or not _latest_liquidity_profile or _current_timeframe != requested_tf:
+        await refresh_liquidity_profile(timeframe=requested_tf)
     if not _latest_liquidity_profile:
         raise HTTPException(status_code=503, detail="Liquidity profile is initializing...")
-    return serialize_liquidity_profile(_latest_liquidity_profile)
+    data = serialize_liquidity_profile(_latest_liquidity_profile)
+    data["timeframe"] = _current_timeframe
+    return data
 
 @app.get("/api/liquidity/zones")
-async def get_liquidity_zones():
+async def get_liquidity_zones(timeframe: Optional[str] = None):
     """Returns all active APEX, Major, and HQ Pullback zones with real-time distance."""
-    global _latest_liquidity_profile
-    if not _latest_liquidity_profile:
-        await refresh_liquidity_profile()
+    global _latest_liquidity_profile, _current_timeframe
+    requested_tf = (timeframe or _current_timeframe).strip().lower()
+    if not _latest_liquidity_profile or _current_timeframe != requested_tf:
+        await refresh_liquidity_profile(timeframe=requested_tf)
     if not _latest_liquidity_profile:
         return {"zones": [], "nearest_support": None, "nearest_resistance": None}
     

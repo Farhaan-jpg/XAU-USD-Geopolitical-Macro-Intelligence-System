@@ -11,15 +11,18 @@ Accurately reproduces TradingView Pine Script v6 logic:
 """
 
 import asyncio
+import json
 import logging
 import math
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
+import websockets
 
 logger = logging.getLogger("LiquidityEngine")
 
@@ -168,10 +171,82 @@ def calculate_atr(bars: List[CandleBar], length: int = 5) -> List[float]:
 # Candle Ingestion Engine
 # ---------------------------------------------------------------------------
 
+async def fetch_tradingview_oanda_candles(
+    timeframe: str = "5m",
+    lookback: int = DEFAULT_LOOKBACK,
+) -> List[CandleBar]:
+    """
+    Fetches real-time institutional OHLCV candles directly from TradingView for OANDA:XAUUSD
+    using TradingView's official chart websocket pipeline.
+    - Zero authentication required.
+    - Provides exact OANDA spot prices and authentic tick volume matching TradingView charts.
+    """
+    tf_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240", "1d": "1D"}
+    resolution = tf_map.get(timeframe, "5")
+    uri = "wss://data.tradingview.com/socket.io/websocket"
+    headers = {
+        "Origin": "https://www.tradingview.com",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
+    def pack(m: str) -> str:
+        return f"~m~{len(m)}~m~{m}"
+
+    bars: List[CandleBar] = []
+    try:
+        async with websockets.connect(uri, additional_headers=headers, open_timeout=5.0) as ws:
+            await ws.recv()  # Initial session info
+            cs = "cs_live_" + str(int(time.time() * 1000))[-8:]
+            p1 = json.dumps({"m": "chart_create_session", "p": [cs, ""]})
+            sym_spec = json.dumps({"symbol": "OANDA:XAUUSD", "adjustment": "splits"})
+            p2 = json.dumps({"m": "resolve_symbol", "p": [cs, "sds_sym_1", "=" + sym_spec]})
+            p3 = json.dumps({"m": "create_series", "p": [cs, "sds_1", "s1", "sds_sym_1", resolution, lookback, ""]})
+
+            await ws.send(pack(p1))
+            await ws.send(pack(p2))
+            await ws.send(pack(p3))
+
+            for _ in range(30):
+                res = await asyncio.wait_for(ws.recv(), timeout=4.0)
+                if "~h~" in res:
+                    await ws.send(res)
+                    continue
+                parts = re.split(r"~m~\d+~m~", res)
+                for part in parts:
+                    if not part.strip():
+                        continue
+                    try:
+                        data = json.loads(part)
+                    except Exception:
+                        continue
+                    if data.get("m") == "timescale_update":
+                        sds = data["p"][1].get("sds_1", {})
+                        raw_bars = sds.get("s", [])
+                        if raw_bars:
+                            for b in raw_bars:
+                                v = b.get("v", [])
+                                if len(v) >= 6:
+                                    bars.append(CandleBar(
+                                        timestamp=float(v[0]),
+                                        open=float(v[1]),
+                                        high=float(v[2]),
+                                        low=float(v[3]),
+                                        close=float(v[4]),
+                                        volume=float(v[5]),
+                                    ))
+                            if len(bars) >= 50:
+                                logger.info("Successfully streamed %d OANDA:XAUUSD bars (%s) from TradingView", len(bars), timeframe)
+                                return bars
+    except Exception as e:
+        logger.debug("TradingView WebSocket candle stream exception: %s", e)
+
+    return bars
+
+
 async def fetch_ohlcv_bars(
     symbol: str = "XAU/USD",
     lookback: int = DEFAULT_LOOKBACK,
-    timeframe: str = "15m",
+    timeframe: str = "5m",
     oanda_api_key: str = "",
     oanda_account_id: str = "",
     oanda_env: str = "practice",
@@ -179,17 +254,26 @@ async def fetch_ohlcv_bars(
 ) -> List[CandleBar]:
     """
     Fetches real historical OHLCV bars for Spot Gold (XAU/USD).
-    Priority 1: Official OANDA v20 API if credentials provided.
-    Priority 2: Binance PAXGUSDT (Paxos 1:1 Spot Gold, sub-second & keyless).
-    Priority 3: Yahoo Finance GC=F (COMEX Gold Futures).
-    Zero-latency synchronization: calibrates the latest candle with current_spot_price.
+    Priority 1: Direct TradingView WebSocket Stream for OANDA:XAUUSD (Exact match to TV Chart & Tick Volume).
+    Priority 2: Official OANDA v20 REST API (if user-provided credentials present).
+    Priority 3: Kraken PAXGUSD (100% asset-backed Spot Gold, US-compliant & accessible on cloud servers).
+    Priority 4: Binance PAXGUSDT (100% asset-backed Spot Gold).
+    Priority 5: Yahoo Finance with automatic spot price calibration (eliminates futures gap).
     """
     bars: List[CandleBar] = []
 
-    # 1. Official OANDA v20 API
+    # 1. Direct TradingView WebSocket Stream for OANDA:XAUUSD (Primary institutional feed)
+    try:
+        bars = await fetch_tradingview_oanda_candles(timeframe=timeframe, lookback=lookback)
+        if len(bars) >= 50:
+            return _finalize_bars(bars, current_spot_price)
+    except Exception as e:
+        logger.debug("TradingView direct candle stream failed: %s, checking alternatives...", e)
+
+    # 2. Official OANDA v20 API
     if oanda_api_key and oanda_account_id:
-        granularity_map = {"1m": "M1", "5m": "M5", "15m": "M15", "1h": "H1", "4h": "H4", "1d": "D"}
-        gran = granularity_map.get(timeframe, "M15")
+        granularity_map = {"1m": "M1", "5m": "M5", "15m": "M15", "30m": "M30", "1h": "H1", "4h": "H4", "1d": "D"}
+        gran = granularity_map.get(timeframe, "M5")
         base_url = "https://api-fxtrade.oanda.com" if oanda_env == "live" else "https://api-fxpractice.oanda.com"
         url = f"{base_url}/v3/instruments/XAU_USD/candles?count={lookback}&granularity={gran}&price=M"
         headers = {"Authorization": f"Bearer {oanda_api_key}", "Content-Type": "application/json"}
@@ -211,14 +295,40 @@ async def fetch_ohlcv_bars(
                             volume=float(c.get("volume", 100.0)),
                         ))
                     if len(bars) >= 50:
-                        logger.debug("Successfully fetched %d bars from OANDA v20 REST", len(bars))
+                        logger.info("Successfully fetched %d bars from OANDA v20 REST", len(bars))
                         return _finalize_bars(bars, current_spot_price)
         except Exception as e:
-            logger.debug("OANDA v20 candles failed: %s, trying Binance PAXGUSDT...", e)
+            logger.debug("OANDA v20 candles failed: %s, trying Kraken/Binance...", e)
 
-    # 2. Binance PAXGUSDT (Paxos Gold, 100% asset-backed Spot Gold, trades at exact XAU/USD parity)
-    binance_interval_map = {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"}
-    interval = binance_interval_map.get(timeframe, "15m")
+    # 3. Kraken PAXGUSD (Paxos 1:1 Spot Gold, US-compliant, works on Render/AWS/GCP without geo-blocks)
+    kraken_tf_map = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440}
+    k_interval = kraken_tf_map.get(timeframe, 5)
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            r = await client.get(
+                f"https://api.kraken.com/0/public/OHLC?pair=PAXGUSD&interval={k_interval}",
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            if r.status_code == 200:
+                data = r.json().get("result", {}).get("PAXGUSD", [])
+                for k in data[-lookback:]:
+                    bars.append(CandleBar(
+                        timestamp=float(k[0]),
+                        open=float(k[1]),
+                        high=float(k[2]),
+                        low=float(k[3]),
+                        close=float(k[4]),
+                        volume=float(k[7]) if float(k[7]) > 0 else (float(k[6]) * 1000 + 10.0),
+                    ))
+                if len(bars) >= 50:
+                    logger.info("Successfully fetched %d bars from Kraken PAXGUSD", len(bars))
+                    return _finalize_bars(bars, current_spot_price)
+    except Exception as e:
+        logger.debug("Kraken PAXGUSD candles failed: %s, trying Binance...", e)
+
+    # 4. Binance PAXGUSDT (Paxos Gold, 100% asset-backed Spot Gold, trades at exact XAU/USD parity)
+    binance_interval_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d"}
+    interval = binance_interval_map.get(timeframe, "5m")
     url = f"https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval={interval}&limit={min(lookback + 50, 1000)}"
     try:
         async with httpx.AsyncClient(timeout=6.0) as client:
@@ -235,16 +345,16 @@ async def fetch_ohlcv_bars(
                         volume=float(k[5]),
                     ))
                 if len(bars) >= 50:
-                    logger.debug("Successfully fetched %d bars from Binance PAXGUSDT", len(bars))
+                    logger.info("Successfully fetched %d bars from Binance PAXGUSDT", len(bars))
                     return _finalize_bars(bars, current_spot_price)
     except Exception as e:
-        logger.debug("Binance PAXGUSDT candles failed: %s, trying Yahoo Finance...", e)
+        logger.debug("Binance PAXGUSDT candles failed: %s, trying calibrated Yahoo Finance...", e)
 
-    # 3. Yahoo Finance COMEX Gold Futures (GC=F)
+    # 5. Yahoo Finance COMEX Gold Futures (GC=F) with Automatic Basis Calibration
     try:
         async with httpx.AsyncClient(timeout=6.0) as client:
             r = await client.get(
-                "https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=15m&range=5d",
+                f"https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval={timeframe}&range=5d",
                 headers={"User-Agent": "Mozilla/5.0"}
             )
             if r.status_code == 200:
@@ -267,19 +377,29 @@ async def fetch_ohlcv_bars(
                             volume=float(volumes[i] or 100.0),
                         ))
                 if len(bars) >= 50:
-                    logger.debug("Successfully fetched %d bars from Yahoo GC=F", len(bars))
+                    # Critical fix: Calibrate futures basis disparity if spot price is known
+                    if current_spot_price and bars:
+                        last_c = bars[-1].close
+                        if abs(last_c - current_spot_price) > 5.0:
+                            diff = current_spot_price - last_c
+                            for b in bars:
+                                b.open += diff
+                                b.high += diff
+                                b.low += diff
+                                b.close += diff
+                    logger.info("Successfully fetched %d bars from Yahoo GC=F (calibrated)", len(bars))
                     return _finalize_bars(bars, current_spot_price)
     except Exception as e:
         logger.warning("Yahoo Finance candles failed: %s", e)
 
-    # 4. Synthesize graceful fallback bars if network is unreachable
+    # 6. Graceful synthesized baseline bars around current spot price
     if not bars:
         logger.warning("Network feeds unreachable. Synthesizing baseline bars around current price.")
         base = current_spot_price or 4390.0
         now_ts = time.time()
         for i in range(lookback):
-            t = now_ts - (lookback - i) * 900
-            drift = math.sin(i / 15.0) * 12.0 + (i / 300.0) * 8.0
+            t = now_ts - (lookback - i) * 300
+            drift = math.sin(i / 15.0) * 10.0 + (i / 300.0) * 5.0
             p = base + drift
             bars.append(CandleBar(
                 timestamp=t,
@@ -374,45 +494,54 @@ class LiquidityEngine:
             trend_state = 0
             trend_label = "Ranging / Consolidation"
 
-        # 2. 10-bar Volume Sum & Normalization
+        # 2. 10-bar Volume Sum & Normalization series matching Pine Script:
+        # vol = math.sum(volume, 10), maxVol = ta.highest(vol, lookBack)
         vol_sums = [0.0] * n_bars
         for i in range(n_bars):
             start_idx = max(0, i - 9)
             vol_sums[i] = sum(volumes[start_idx : i + 1])
 
-        # maxVol over lookBack
-        active_vol_sums = vol_sums[-lb:]
-        max_vol = max(active_vol_sums) if active_vol_sums else 1.0
-
+        max_vols = [
+            max(vol_sums[max(0, i - lb + 1) : i + 1]) for i in range(n_bars)
+        ]
         n_vol_series = [
-            (vol_sums[i] / max_vol * 100.0) if max_vol > 0 else 0.0
+            (vol_sums[i] / max_vols[i] * 100.0) if max_vols[i] > 0 else 0.0
             for i in range(n_bars)
         ]
 
-        # 3. ATR(5) / 50 and dynamic offset
+        # 3. ATR(5) / 50 and dynamic offset series matching Pine Script:
+        # atr = ta.atr(5) / 50, offset = ta.highest(atr * nVol, lookBack)
         atr_series = calculate_atr(bars, length=5)
         scaled_atr = [atr / 50.0 for atr in atr_series]
-
         atr_nvol = [scaled_atr[i] * n_vol_series[i] for i in range(n_bars)]
-        active_atr_nvol = atr_nvol[-lb:]
-        offset = max(active_atr_nvol) if active_atr_nvol else 0.5
+        offsets = [
+            max(atr_nvol[max(0, i - lb + 1) : i + 1]) for i in range(n_bars)
+        ]
 
-        # 4. Top and Bot Dynamic Boundaries
+        # 4. Top and Bot Dynamic Boundaries series matching Pine Script:
         # top = ta.highest(high + offset, lookBack), bot = ta.lowest(low - offset, lookBack)
-        active_highs = highs[-lb:]
-        active_lows = lows[-lb:]
-        top = max(active_highs) + offset
-        bot = min(active_lows) - offset
+        high_plus_offset = [highs[i] + offsets[i] for i in range(n_bars)]
+        low_minus_offset = [lows[i] - offsets[i] for i in range(n_bars)]
+        tops = [
+            max(high_plus_offset[max(0, i - lb + 1) : i + 1]) for i in range(n_bars)
+        ]
+        bots = [
+            min(low_minus_offset[max(0, i - lb + 1) : i + 1]) for i in range(n_bars)
+        ]
+
+        top = tops[-1]
+        bot = bots[-1]
         if top <= bot:
             top = bot + 10.0
 
         # 5. High-Resolution (100-step) Liquidity Pivot Tracker
-        step_res = (top - bot) / self.resolution
         pivots: List[Pivot] = []
-
         start_bar_index = n_bars - lb
         for idx in range(start_bar_index, n_bars):
-            # h = ta.highest(high, 2), l = ta.lowest(low, 2)
+            top_i = tops[idx]
+            bot_i = bots[idx]
+            step_res = (top_i - bot_i) / self.resolution if top_i > bot_i else (top - bot) / self.resolution
+
             prev_idx = max(0, idx - 1)
             h = max(highs[prev_idx], highs[idx])
             l = min(lows[prev_idx], lows[idx])
@@ -423,7 +552,7 @@ class LiquidityEngine:
             # High Pivot
             if h == highs[idx]:
                 for step_i in range(self.resolution):
-                    b_lower = bot + step_res * step_i
+                    b_lower = bot_i + step_res * step_i
                     mid = b_lower + step_res / 2.0
                     if abs(level1 - mid) <= step_res:
                         pivots.append(Pivot(
@@ -437,7 +566,7 @@ class LiquidityEngine:
             # Low Pivot
             if l == lows[idx]:
                 for step_i in range(self.resolution):
-                    b_lower = bot + step_res * step_i
+                    b_lower = bot_i + step_res * step_i
                     mid = b_lower + step_res / 2.0
                     if abs(level2 - mid) <= step_res:
                         pivots.append(Pivot(
@@ -448,8 +577,7 @@ class LiquidityEngine:
                             is_lower=True,
                         ))
 
-            # Dynamic Invalidation Filter:
-            # "if (p.isLower and low < p.value) or (not p.isLower and high > p.value) -> remove"
+            # Dynamic Invalidation Filter matching Pine Script backwards removal:
             bar_low = lows[idx]
             bar_high = highs[idx]
             pivots = [
@@ -659,6 +787,37 @@ class LiquidityEngine:
             resistances.sort(key=lambda z: abs(z.lower - current_close))
             nearest_resistance = resistances[0]
             dist_res = round(abs(nearest_resistance.lower - current_close), 2)
+        elif max_bin_vol > 0:
+            # If no major zone passed the 85%/65% threshold above price (e.g. during a fast intraday sell-off),
+            # detect the highest-volume profile block above current price (>= 40% of peak volume)
+            # so Nearest Resistance is always accurate to the chart's overhead liquidity structure!
+            overhead_bins = [b for b in heatmap_bins if b.mid > current_close and b.volume >= max_bin_vol * 0.40]
+            if overhead_bins:
+                overhead_bins.sort(key=lambda b: abs(b.lower - current_close))
+                best_res_bin = overhead_bins[0]
+                vol_pct = round(best_res_bin.volume / max_bin_vol * 100.0, 1)
+                nearest_resistance = LiquidityZone(
+                    id=f"zone_bin_{best_res_bin.index}_short_overhead",
+                    bin_index=best_res_bin.index,
+                    lower=best_res_bin.lower,
+                    upper=best_res_bin.upper,
+                    mid=best_res_bin.mid,
+                    volume=round(best_res_bin.volume, 2),
+                    volume_pct=vol_pct,
+                    is_lower=False,
+                    is_major=False,
+                    is_apex=False,
+                    is_pullback=True,
+                    zone_type="HQ Pullback Short",
+                    signal="SELL",
+                    sl_price=best_res_bin.upper,
+                    start_bar=n_bars - 1,
+                    box_color="rgba(217, 70, 239, 0.20)",
+                    border_color="#d946ef",
+                )
+                dist_res = round(abs(nearest_resistance.lower - current_close), 2)
+                all_active_zones.append(nearest_resistance)
+                pullback_zones.append(nearest_resistance)
 
         return LiquidityProfileResult(
             timestamp=datetime.now(timezone.utc).isoformat(),
