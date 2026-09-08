@@ -27,7 +27,10 @@ from app import (
     AssetImpact,
     process_raw_item,
     GROQ_CANDIDATE_MODELS,
+    GEMINI_CANDIDATE_MODELS,
+    OPENROUTER_CANDIDATE_MODELS,
     OPENAI_CANDIDATE_MODELS,
+    generate_macro_event_scenarios,
 )
 from httpx import ASGITransport, AsyncClient
 
@@ -235,11 +238,26 @@ async def test_api_endpoints():
         assert "AUREUS" in ui_resp.text
         assert "Macro Asset Transmission Matrix" in ui_resp.text
 async def test_ai_fallback_cascade():
-    print("\n--- 6. Testing AI Multi-Model Fallback Cascade ---")
+    print("\n--- 6. Testing Multi-Provider AI Fallback Cascade ---")
     assert len(GROQ_CANDIDATE_MODELS) >= 5, "Groq must have multiple fallback models configured!"
     assert "llama-3.1-8b-instant" in GROQ_CANDIDATE_MODELS, "llama-3.1-8b-instant must be in Groq fallbacks!"
+    assert len(GEMINI_CANDIDATE_MODELS) >= 3, "Gemini must have multiple fallback models configured!"
+    assert len(OPENROUTER_CANDIDATE_MODELS) >= 4, "OpenRouter must have multiple fallback models configured!"
     assert len(OPENAI_CANDIDATE_MODELS) >= 3, "OpenAI must have multiple fallback models configured!"
     
+    # Test economic calendar macro scenario generator
+    scenarios = generate_macro_event_scenarios(
+        title="Economic Release: Core CPI m/m",
+        summary="ForexFactory Calendar Release [USD] Impact: High. Forecast: 0.3%, Previous: 0.3%",
+        source="ForexFactory (USD)",
+        country="USD"
+    )
+    assert scenarios["event_type"] == "INFLATION"
+    assert "bullish_trigger" in scenarios
+    assert "bearish_trigger" in scenarios
+    assert "transmission" in scenarios
+    print("  [PASS] Macro economic calendar scenario engine generated institutional rules for CPI")
+
     res = await analyze_headline(
         title="Fed signals upcoming rate pause amidst cooling labor market",
         summary="Treasuries rally on dovish central bank signals.",
@@ -249,7 +267,7 @@ async def test_ai_fallback_cascade():
     assert "relevance" in res
     assert res["relevance"] is True
     assert "gold_bias" in res
-    print(f"  [PASS] AI fallback cascade verified: {len(GROQ_CANDIDATE_MODELS)} Groq fallback models, {len(OPENAI_CANDIDATE_MODELS)} OpenAI models, seamless heuristic fallback active.")
+    print(f"  [PASS] Multi-provider AI cascade verified: {len(GROQ_CANDIDATE_MODELS)} Groq, {len(GEMINI_CANDIDATE_MODELS)} Gemini, {len(OPENROUTER_CANDIDATE_MODELS)} OpenRouter, {len(OPENAI_CANDIDATE_MODELS)} OpenAI models, seamless heuristic fallback active.")
 
 async def run_all_tests():
     print("=================================================================")

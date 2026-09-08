@@ -203,7 +203,17 @@
           <span>SYNC: <span id="sync-countdown-text" class="text-amber-400 font-bold">25s</span></span>
         </div>
 
-        <!-- Sound Toggle -->
+        <!-- Real-Time Voice Squawk Toggle -->
+        <button id="voice-toggle-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950/70 border border-indigo-500/40 text-indigo-300 hover:border-indigo-400 hover:text-indigo-100 transition-all shadow-sm" title="Toggle Real-Time AI Squawk Voice Broadcast">
+          <div class="relative flex items-center justify-center">
+            <i id="voice-icon" data-lucide="mic" class="w-3.5 h-3.5 text-indigo-300"></i>
+            <span id="voice-pulse" class="hidden absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+          </div>
+          <span class="text-[11px] font-mono font-semibold hidden md:inline">SQUAWK:</span>
+          <span id="voice-status-text" class="text-[11px] font-mono font-bold text-emerald-400">ON</span>
+        </button>
+
+        <!-- Sound Chime Toggle -->
         <button id="sound-toggle-btn" class="p-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-gold-accent hover:border-gold-accent/40 transition-colors" title="Toggle Web Audio Chime Alerts">
           <i id="sound-icon" data-lucide="volume-2" class="w-4 h-4"></i>
         </button>
@@ -420,17 +430,29 @@
     </section>
 
     <!-- ================= 5b. UPCOMING HIGH-IMPACT MACRO SCHEDULE ================= -->
-    <section id="upcoming-calendar-section" class="hidden glass-card p-4 rounded-xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/20 via-zinc-900/70 to-zinc-950/80">
-      <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center gap-2">
-          <i data-lucide="calendar-clock" class="w-4 h-4 text-indigo-400"></i>
-          <span class="text-xs font-mono font-bold text-indigo-300 tracking-wider">UPCOMING HIGH-IMPACT MACRO SCHEDULE</span>
-          <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">FOREXFACTORY</span>
+    <section id="upcoming-calendar-section" class="hidden glass-card p-5 rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/25 via-zinc-900/80 to-zinc-950/90 shadow-xl space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-indigo-500/20 pb-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-300">
+            <i data-lucide="calendar-clock" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs sm:text-sm font-mono font-extrabold text-indigo-200 tracking-wider">UPCOMING ECONOMIC CALENDAR & PREDICTIVE XAU/USD SCENARIOS</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold">INSTITUTIONAL RULES</span>
+            </div>
+            <p class="text-[11px] text-zinc-400 font-mono">Live Second-by-Second Countdowns, Forecast vs Previous & Pre-Release Trading Triggers</p>
+          </div>
         </div>
-        <span class="text-[11px] font-mono text-zinc-500">Nearest Scheduled Releases</span>
+        <div class="flex items-center gap-2">
+          <span id="calendar-active-badge" class="text-xs font-mono text-indigo-300 bg-indigo-950/60 px-2.5 py-1 rounded-md border border-indigo-500/30 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="calendar-count-text">High-Impact Events</span>
+          </span>
+        </div>
       </div>
-      <div id="upcoming-calendar-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-        <!-- Dynamic calendar cards -->
+      <div id="upcoming-calendar-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        <!-- Dynamic rich calendar cards with countdowns and scenarios -->
       </div>
     </section>
 
@@ -877,6 +899,11 @@
             </div>
 
             <div class="flex items-center gap-2">
+              <button onclick="speakEventById('${ev.id}')" class="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-indigo-300 hover:border-indigo-500/40 text-[11px] font-mono flex items-center gap-1 transition-colors" title="Read Aloud with Institutional Squawk Box">
+                <i data-lucide="volume-2" class="w-3 h-3 text-indigo-400"></i>
+                <span>Squawk</span>
+              </button>
+
               <button onclick="copyBriefing('${ev.id}')" class="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-[11px] font-mono flex items-center gap-1 transition-colors">
                 <i data-lucide="copy" class="w-3 h-3"></i>
                 <span class="copy-label-${ev.id}">Copy</span>
@@ -1029,6 +1056,9 @@
           playAlertChime(event.severity);
         }
 
+        // Automatic Zero-Delay Voice Update
+        voiceSquawk.speakEvent(event);
+
         renderFeed();
         updateCorrelationMatrix(event);
         computeDynamicStats();
@@ -1117,27 +1147,275 @@
       } catch (e) {}
     }
 
+    // Institutional AI Voice Squawk Box (Web Speech API)
+    const voiceSquawk = {
+      enabled: true,
+      speaking: false,
+      queue: [],
+      selectedVoice: null,
+
+      init() {
+        const saved = localStorage.getItem('aureus_voice_enabled');
+        if (saved !== null) {
+          this.enabled = saved === 'true';
+        }
+        this.updateUi();
+
+        if ('speechSynthesis' in window) {
+          const loadVoices = () => {
+            const voices = window.speechSynthesis.getVoices();
+            if (voices.length > 0) {
+              this.selectedVoice = voices.find(v => 
+                v.lang.startsWith('en') && (
+                  v.name.includes('Natural') || 
+                  v.name.includes('Google') || 
+                  v.name.includes('Samantha') || 
+                  v.name.includes('David') || 
+                  v.name.includes('Daniel') ||
+                  v.name.includes('Zira')
+                )
+              ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+            }
+          };
+          loadVoices();
+          if (window.speechSynthesis.onvoiceschanged !== undefined) {
+            window.speechSynthesis.onvoiceschanged = loadVoices;
+          }
+        }
+      },
+
+      toggle() {
+        this.enabled = !this.enabled;
+        localStorage.setItem('aureus_voice_enabled', this.enabled.toString());
+        if (!this.enabled && 'speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          this.queue = [];
+          this.speaking = false;
+        }
+        this.updateUi();
+        if (this.enabled) {
+          this.speakText("AI Voice Squawk activated. Monitoring live XAU USD geopolitical and macro feed.");
+        }
+      },
+
+      updateUi() {
+        const statusText = document.getElementById('voice-status-text');
+        const pulse = document.getElementById('voice-pulse');
+        const icon = document.getElementById('voice-icon');
+        const btn = document.getElementById('voice-toggle-btn');
+        if (statusText) {
+          statusText.textContent = this.enabled ? 'ON' : 'MUTED';
+          statusText.className = `text-[11px] font-mono font-bold ${this.enabled ? 'text-emerald-400' : 'text-zinc-500'}`;
+        }
+        if (icon) {
+          icon.className = `w-3.5 h-3.5 ${this.enabled ? 'text-indigo-300' : 'text-zinc-500'}`;
+        }
+        if (btn) {
+          if (this.enabled) {
+            btn.classList.add('border-indigo-500/50', 'bg-indigo-950/70');
+            btn.classList.remove('border-zinc-800', 'bg-zinc-900');
+          } else {
+            btn.classList.remove('border-indigo-500/50', 'bg-indigo-950/70');
+            btn.classList.add('border-zinc-800', 'bg-zinc-900');
+          }
+        }
+        if (pulse) {
+          pulse.classList.toggle('hidden', !this.speaking);
+        }
+      },
+
+      speakEvent(event) {
+        if (!this.enabled || !('speechSynthesis' in window)) return;
+        if (!event || !event.title) return;
+
+        const title = event.title.replace(/<[^>]+>/g, '').trim();
+        const source = (event.source || 'Breaking Wire').replace('ForexFactory ', '');
+        const bias = (event.gold_bias || 'NEUTRAL').replace('_', ' ');
+        const momentum = event.potential_momentum || 'Normal volatility';
+        const reason = (event.transmission_mechanism || '').replace(/<[^>]+>/g, '').slice(0, 150);
+
+        const squawkScript = `Flash Gold Alert! ${event.severity || 'Market'} event from ${source}. ${title}. Gold bias: ${bias}, expected momentum: ${momentum}. Driver: ${reason}`;
+        this.speakText(squawkScript);
+      },
+
+      speakText(text) {
+        if (!this.enabled || !('speechSynthesis' in window) || !text) return;
+        this.queue.push(text);
+        this.processQueue();
+      },
+
+      processQueue() {
+        if (this.speaking || this.queue.length === 0) return;
+        this.speaking = true;
+        this.updateUi();
+
+        const textToSpeak = this.queue.shift();
+        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        if (this.selectedVoice) {
+          utterance.voice = this.selectedVoice;
+        }
+        utterance.rate = 1.05;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        utterance.onend = () => {
+          this.speaking = false;
+          this.updateUi();
+          setTimeout(() => this.processQueue(), 250);
+        };
+
+        utterance.onerror = () => {
+          this.speaking = false;
+          this.updateUi();
+          setTimeout(() => this.processQueue(), 250);
+        };
+
+        try {
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {
+          this.speaking = false;
+          this.updateUi();
+        }
+      }
+    };
+
+    function speakEventById(eventId) {
+      const ev = allEvents.find(e => e.id === eventId);
+      if (ev) {
+        voiceSquawk.speakEvent(ev);
+      }
+    }
+
+    function speakCalendarScenario(eventId) {
+      const item = (window.upcomingCalendarData || []).find(e => e.id === eventId);
+      if (item) {
+        const scenarios = item.macro_scenarios || {};
+        const title = item.title.replace('Economic Release: ', '');
+        const script = `Upcoming Economic Release: ${title}. Consensus forecast is ${item.forecast || 'not specified'}, previous was ${item.previous || 'not specified'}. Bullish scenario for Gold: ${scenarios.bullish_trigger || 'Disinflation cools real yields'}. Target: ${scenarios.bullish_pip_target || 'rally'}. Bearish scenario: ${scenarios.bearish_trigger || 'Hot inflation supports the dollar'}. Target: ${scenarios.bearish_pip_target || 'drop'}. Economic mechanism: ${scenarios.transmission || 'Dollar and Treasury yield sensitivity.'}`;
+        voiceSquawk.speakText(script);
+      }
+    }
+
+    function startCalendarCountdownTimer() {
+      setInterval(() => {
+        const nowSec = Date.now() / 1000;
+        document.querySelectorAll('.countdown-timer-element').forEach(el => {
+          const targetEpoch = parseFloat(el.getAttribute('data-epoch') || '0');
+          const diffSec = targetEpoch - nowSec;
+
+          if (diffSec <= 0) {
+            el.innerHTML = '<span class="text-rose-400 font-bold animate-pulse">⚡ RELEASING NOW</span>';
+            return;
+          }
+
+          const days = Math.floor(diffSec / 86400);
+          const hours = Math.floor((diffSec % 86400) / 3600);
+          const mins = Math.floor((diffSec % 3600) / 60);
+          const secs = Math.floor(diffSec % 60);
+
+          const dPart = days > 0 ? `${days}d ` : '';
+          const hPart = `${String(hours).padStart(2, '0')}h `;
+          const mPart = `${String(mins).padStart(2, '0')}m `;
+          const sPart = `${String(secs).padStart(2, '0')}s`;
+
+          el.innerHTML = `<span class="text-amber-300 font-mono font-bold tracking-wider">${dPart}${hPart}${mPart}${sPart}</span>`;
+        });
+      }, 1000);
+    }
+
     function renderUpcomingCalendar(upcomingList) {
       const section = document.getElementById('upcoming-calendar-section');
       const container = document.getElementById('upcoming-calendar-cards');
+      const countText = document.getElementById('calendar-count-text');
       if (!section || !container || !upcomingList || upcomingList.length === 0) return;
 
-      container.innerHTML = upcomingList.slice(0, 4).map(item => {
-        const isUpcoming = true;
-        const timeFormatted = formatEventTime(item.published_at, true);
+      window.upcomingCalendarData = upcomingList;
+      if (countText) countText.textContent = `${upcomingList.length} High-Impact Releases`;
+
+      container.innerHTML = upcomingList.slice(0, 6).map(item => {
+        const epoch = parseFloat(item.published_epoch) || (new Date(item.published_at).getTime() / 1000);
+        const scenarios = item.macro_scenarios || {};
+        const country = item.country || (item.source || '').replace('ForexFactory (', '').replace(')', '') || 'USD';
+        const impact = item.impact || 'High';
+        const impactBadge = impact === 'High' 
+          ? '<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold flex items-center gap-1">🔥 HIGH IMPACT</span>'
+          : '<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1">⚡ MEDIUM IMPACT</span>';
 
         return `
-          <div class="p-3 rounded-lg bg-zinc-900/90 border border-indigo-500/25 flex flex-col justify-between hover:border-indigo-500/50 transition-colors">
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-xs font-mono font-bold text-zinc-100 line-clamp-1">${escapeHtml(item.title.replace('Economic Release: ', ''))}</span>
-              <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 font-semibold">${escapeHtml(item.source.replace('ForexFactory ', ''))}</span>
+          <div class="p-4 rounded-xl bg-zinc-900/90 border border-indigo-500/30 flex flex-col justify-between hover:border-indigo-400/60 transition-all shadow-md group relative overflow-hidden" id="calendar-card-${item.id}">
+            <!-- Header Row -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-zinc-800 text-zinc-200 border border-zinc-700">
+                  ${country === 'USD' ? '🇺🇸' : country === 'EUR' ? '🇪🇺' : country === 'GBP' ? '🇬🇧' : country === 'JPY' ? '🇯🇵' : '🌐'} ${country}
+                </span>
+                ${impactBadge}
+              </div>
+
+              <h4 class="text-sm font-bold text-zinc-100 group-hover:text-amber-300 transition-colors mb-2 leading-snug">
+                ${escapeHtml(item.title.replace('Economic Release: ', ''))}
+              </h4>
+
+              <!-- Realtime Countdown Timer -->
+              <div class="mb-3 p-2 rounded-lg bg-black/60 border border-indigo-500/30 flex items-center justify-between">
+                <span class="text-[11px] font-mono text-zinc-400 flex items-center gap-1">
+                  <i data-lucide="timer" class="w-3.5 h-3.5 text-gold-accent"></i>
+                  <span>COUNTDOWN:</span>
+                </span>
+                <div class="countdown-timer-element font-mono text-xs font-bold text-amber-300" data-epoch="${epoch}">
+                  Calculating...
+                </div>
+              </div>
+
+              <!-- Forecast vs Previous Metrics -->
+              <div class="grid grid-cols-2 gap-2 text-[11px] font-mono bg-zinc-950/80 p-2 rounded-lg border border-zinc-800/80 mb-3">
+                <div>
+                  <span class="text-zinc-500 block text-[10px]">CONSENSUS FORECAST</span>
+                  <span class="text-zinc-100 font-bold">${escapeHtml(item.forecast || 'N/A')}</span>
+                </div>
+                <div>
+                  <span class="text-zinc-500 block text-[10px]">PREVIOUS RELEASE</span>
+                  <span class="text-zinc-400">${escapeHtml(item.previous || 'N/A')}</span>
+                </div>
+              </div>
+
+              <!-- AI Scenario Triggers -->
+              <div class="space-y-1.5 mb-3">
+                <div class="p-2 rounded-lg bg-emerald-950/30 border border-emerald-500/30 text-[11px] text-emerald-200">
+                  <div class="flex items-center justify-between font-bold">
+                    <span>🟢 Bullish Trigger:</span>
+                    <span class="text-[10px] font-mono text-emerald-400">${escapeHtml(scenarios.bullish_pip_target || '+20 to +40 pips')}</span>
+                  </div>
+                  <p class="text-[10px] text-emerald-300/80 mt-0.5 leading-snug">${escapeHtml(scenarios.bullish_trigger || 'Cooler numbers lower real yields.')}</p>
+                </div>
+
+                <div class="p-2 rounded-lg bg-rose-950/30 border border-rose-500/30 text-[11px] text-rose-200">
+                  <div class="flex items-center justify-between font-bold">
+                    <span>🔴 Bearish Trigger:</span>
+                    <span class="text-[10px] font-mono text-rose-400">${escapeHtml(scenarios.bearish_pip_target || '-15 to -30 pips')}</span>
+                  </div>
+                  <p class="text-[10px] text-rose-300/80 mt-0.5 leading-snug">${escapeHtml(scenarios.bearish_trigger || 'Hotter numbers boost dollar and yields.')}</p>
+                </div>
+              </div>
+
+              <!-- Transmission & Volatility -->
+              <div class="text-[10px] text-zinc-400 bg-zinc-950/60 p-2 rounded-lg border border-zinc-800 mb-3 space-y-1">
+                <p class="text-zinc-300 font-sans italic line-clamp-2">⚡ ${escapeHtml(scenarios.transmission || 'Real interest rates & currency valuation dynamics.')}</p>
+                <div class="flex items-center justify-between font-mono pt-1 border-t border-zinc-800/80">
+                  <span>Est. Volatility: <strong class="text-amber-400">${escapeHtml(scenarios.expected_volatility || 'High')}</strong></span>
+                  <span>Driver: <strong class="text-zinc-200">${escapeHtml(scenarios.key_correlated_asset || 'DXY / TIPS')}</strong></span>
+                </div>
+              </div>
             </div>
-            <div class="text-[11px] font-mono text-indigo-300 font-semibold mb-1 flex items-center gap-1">
-              <span>${timeFormatted}</span>
+
+            <!-- Card Actions -->
+            <div class="pt-2 border-t border-zinc-800/80 flex items-center justify-between gap-2">
+              <span class="text-[10px] font-mono text-indigo-400 truncate">${formatEventTime(item.published_at, true)}</span>
+              <button onclick="speakCalendarScenario('${item.id}')" class="px-2.5 py-1 rounded-md bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 text-[11px] font-mono font-semibold flex items-center gap-1 transition-colors">
+                <i data-lucide="volume-2" class="w-3 h-3 text-indigo-400"></i>
+                <span>Hear Scenarios</span>
+              </button>
             </div>
-            <p class="text-[10px] text-zinc-400 line-clamp-1 font-sans">
-              ${escapeHtml(item.summary)}
-            </p>
           </div>
         `;
       }).join('');
@@ -1159,7 +1437,15 @@
 
     // Interactive Controls
     function setupInteractions() {
-      // Sound Toggle
+      // Voice Squawk Toggle
+      const voiceBtn = document.getElementById('voice-toggle-btn');
+      if (voiceBtn) {
+        voiceBtn.addEventListener('click', () => {
+          voiceSquawk.toggle();
+        });
+      }
+
+      // Sound Chime Toggle
       const soundBtn = document.getElementById('sound-toggle-btn');
       const soundIcon = document.getElementById('sound-icon');
       function updateSoundUi() {
@@ -1277,6 +1563,8 @@
     // App Startup
     window.addEventListener('DOMContentLoaded', async () => {
       renderIcons();
+      voiceSquawk.init();
+      startCalendarCountdownTimer();
       setupInteractions();
       await fetchInitialOandaPrice();
       await fetchInitialEvents();
@@ -1288,6 +1576,12 @@
         if (h.groq_configured) {
           const modelTag = h.groq_active_model ? h.groq_active_model.replace('llama-', 'Llama-').replace('llama', 'Llama-') : 'Active';
           badge.textContent = `Groq (${modelTag})`;
+        } else if (h.gemini_configured) {
+          const modelTag = h.gemini_active_model ? h.gemini_active_model.replace('gemini-', 'Gemini-') : '2.0-Flash';
+          badge.textContent = `Gemini (${modelTag})`;
+        } else if (h.openrouter_configured) {
+          const modelTag = h.openrouter_active_model ? h.openrouter_active_model.split('/').pop().replace(':free', '') : 'Free';
+          badge.textContent = `OpenRouter (${modelTag})`;
         } else if (h.openai_configured) {
           badge.textContent = `OpenAI (${h.openai_active_model || 'GPT-4o'})`;
         } else {

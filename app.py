@@ -41,11 +41,20 @@ DB_PATH = os.getenv("DB_PATH", "intelligence.db")
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "25"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "").strip()
+
+# Google Gemini Credentials & Models
+GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip()
+
+# OpenRouter Credentials & Models (Free community models prioritized)
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "").strip()
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "").strip()
 
 # Resilient Model Cascades for Automatic Fallbacks
-# llama-3.1-8b-instant is universally available across all free and paid Groq tiers with sub-200ms latency.
+# 1. Groq Cascade (Ultra-low latency inference)
 GROQ_CANDIDATE_MODELS = [m for m in [
     GROQ_MODEL,
     "llama-3.1-8b-instant",
@@ -60,6 +69,27 @@ GROQ_CANDIDATE_MODELS = [m for m in [
     "llama3-8b-8192",
 ] if m]
 
+# 2. Google Gemini Cascade (Generous free tier via AI Studio)
+GEMINI_CANDIDATE_MODELS = [m for m in [
+    GEMINI_MODEL,
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-2.0-flash-exp",
+] if m]
+
+# 3. OpenRouter Cascade (Free community models)
+OPENROUTER_CANDIDATE_MODELS = [m for m in [
+    OPENROUTER_MODEL,
+    "google/gemini-2.0-flash-exp:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "deepseek/deepseek-r1:free",
+    "openrouter/auto",
+] if m]
+
+# 4. OpenAI Cascade
 OPENAI_CANDIDATE_MODELS = [m for m in [
     OPENAI_MODEL,
     "gpt-4o-mini",
@@ -69,10 +99,15 @@ OPENAI_CANDIDATE_MODELS = [m for m in [
 
 # Runtime working model cache
 _active_groq_model: Optional[str] = None
+_active_gemini_model: Optional[str] = None
+_active_openrouter_model: Optional[str] = None
 _active_openai_model: Optional[str] = None
 
+# Telegram Notifications
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+TELEGRAM_NOTIFY_ALL_EVENTS = os.getenv("TELEGRAM_NOTIFY_ALL_EVENTS", "true").strip().lower() in ["true", "1", "yes"]
+
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", 8000))
 
@@ -227,29 +262,47 @@ async def get_recent_events(limit: int = 50) -> List[Dict[str, Any]]:
 async def get_upcoming_calendar(limit: int = 15) -> List[Dict[str, Any]]:
     """
     Retrieves upcoming scheduled economic releases ordered chronologically ascending (nearest event first).
+    Enriches each release with actionable AI/Macro scenario triggers on Spot Gold (XAU/USD).
     """
     now = time.time()
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            """SELECT * FROM events 
-               WHERE (is_upcoming = 1 OR published_epoch > ?) 
-               ORDER BY published_epoch ASC 
-               LIMIT ?""",
-            (now, limit)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            results = []
-            for row in rows:
-                item = dict(row)
-                item["relevance"] = bool(item["relevance"])
-                item["is_upcoming"] = True
-                try:
-                    item["correlated_assets_impact"] = json.loads(item["correlated_assets_json"])
-                except Exception:
-                    item["correlated_assets_impact"] = {}
-                results.append(item)
-            return results
+    results = []
+    seen_ids = set()
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT * FROM events 
+                   WHERE (is_upcoming = 1 OR published_epoch > ?) 
+                   ORDER BY published_epoch ASC 
+                   LIMIT ?""",
+                (now, limit)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                for row in rows:
+                    item = dict(row)
+                    item["relevance"] = bool(item["relevance"])
+                    item["is_upcoming"] = True
+                    try:
+                        item["correlated_assets_impact"] = json.loads(item["correlated_assets_json"])
+                    except Exception:
+                        item["correlated_assets_impact"] = {}
+                    item["macro_scenarios"] = generate_macro_event_scenarios(
+                        item.get("title", ""), item.get("summary", ""), item.get("source", "")
+                    )
+                    results.append(item)
+                    seen_ids.add(item.get("id"))
+    except Exception as e:
+        logger.debug("Error querying upcoming events from DB: %s", e)
+
+    # Supplement with any cached in-memory upcoming calendar releases
+    for c_item in _calendar_cache.get("items", []):
+        if c_item.get("id") not in seen_ids and float(c_item.get("published_epoch") or 0) > now:
+            results.append(c_item)
+            seen_ids.add(c_item.get("id"))
+
+    results.sort(key=lambda x: float(x.get("published_epoch") or 0))
+    return results[:limit]
 
 async def is_event_processed(event_id: str) -> bool:
     """Checks if an event ID already exists in the database."""
@@ -308,7 +361,8 @@ async def dispatch_telegram_alert(event: IntelligenceEvent):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
 
-    if event.severity not in ["CRITICAL", "HIGH"]:
+    # Notify on all events if TELEGRAM_NOTIFY_ALL_EVENTS is True (default)
+    if not TELEGRAM_NOTIFY_ALL_EVENTS and event.severity not in ["CRITICAL", "HIGH"]:
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -527,6 +581,115 @@ async def call_groq_llm(title: str, summary: str, source: str) -> Optional[Dict[
 
     return None
 
+async def call_gemini_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
+    """Calls Google Gemini API with automatic cascading fallback across candidate models."""
+    global _active_gemini_model
+    if not GEMINI_API_KEY:
+        return None
+
+    user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
+    prompt_text = f"{LLM_SYSTEM_PROMPT}\n\nTask:\n{user_content}"
+
+    models_to_try = [_active_gemini_model] if _active_gemini_model else []
+    for m in GEMINI_CANDIDATE_MODELS:
+        if m not in models_to_try:
+            models_to_try.append(m)
+
+    for model_name in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt_text}]}],
+            "generationConfig": {
+                "response_mime_type": "application/json",
+                "temperature": 0.1,
+                "max_output_tokens": 600,
+            }
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=9.0) as client:
+                resp = await client.post(url, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates and "content" in candidates[0]:
+                        parts = candidates[0]["content"].get("parts", [])
+                        if parts and "text" in parts[0]:
+                            raw_json = parts[0]["text"]
+                            parsed = json.loads(raw_json)
+                            if _active_gemini_model != model_name:
+                                logger.info("Google Gemini model active & verified: %s", model_name)
+                                _active_gemini_model = model_name
+                            return parsed
+                elif resp.status_code in [404, 400, 429]:
+                    if _active_gemini_model == model_name:
+                        _active_gemini_model = None
+                    logger.warning("Google Gemini model '%s' returned status %d. Switching to fallback...", model_name, resp.status_code)
+                    continue
+                else:
+                    logger.warning("Google Gemini API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
+        except Exception as e:
+            logger.error("Google Gemini API call error with model %s: %s", model_name, e)
+            continue
+
+    return None
+
+async def call_openrouter_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
+    """Calls OpenRouter API with automatic cascading fallback across free candidate models."""
+    global _active_openrouter_model
+    if not OPENROUTER_API_KEY:
+        return None
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/Farhaan-jpg/XAU-USD-Geopolitical-Macro-Intelligence-System",
+        "X-Title": "XAUUSD Macro Intelligence System",
+    }
+    user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
+
+    models_to_try = [_active_openrouter_model] if _active_openrouter_model else []
+    for m in OPENROUTER_CANDIDATE_MODELS:
+        if m not in models_to_try:
+            models_to_try.append(m)
+
+    for model_name in models_to_try:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": LLM_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+            "max_tokens": 600,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=9.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw_json = data["choices"][0]["message"]["content"]
+                    parsed = json.loads(raw_json)
+                    if _active_openrouter_model != model_name:
+                        logger.info("OpenRouter model active & verified: %s", model_name)
+                        _active_openrouter_model = model_name
+                    return parsed
+                elif resp.status_code in [404, 400, 429]:
+                    if _active_openrouter_model == model_name:
+                        _active_openrouter_model = None
+                    logger.warning("OpenRouter model '%s' returned status %d. Switching to fallback...", model_name, resp.status_code)
+                    continue
+                else:
+                    logger.warning("OpenRouter API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
+        except Exception as e:
+            logger.error("OpenRouter API call error with model %s: %s", model_name, e)
+            continue
+
+    return None
+
 async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
     """Calls OpenAI API with automatic cascading fallback across candidate models."""
     global _active_openai_model
@@ -583,7 +746,7 @@ async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dic
 
 async def auto_select_working_ai_models():
     """Proactively checks and caches the best accessible models on startup."""
-    global _active_groq_model, _active_openai_model
+    global _active_groq_model, _active_gemini_model, _active_openrouter_model, _active_openai_model
 
     # 1. Groq Model Discovery
     if GROQ_API_KEY:
@@ -607,21 +770,51 @@ async def auto_select_working_ai_models():
             _active_groq_model = GROQ_CANDIDATE_MODELS[0]
             logger.info("Groq active model initialized to primary candidate: %s", _active_groq_model)
 
-    # 2. OpenAI Model Discovery
+    # 2. Google Gemini Model Discovery
+    if GEMINI_API_KEY:
+        _active_gemini_model = GEMINI_MODEL or GEMINI_CANDIDATE_MODELS[0]
+        logger.info("Google Gemini active model initialized to: %s", _active_gemini_model)
+
+    # 3. OpenRouter Model Discovery
+    if OPENROUTER_API_KEY:
+        _active_openrouter_model = OPENROUTER_MODEL or OPENROUTER_CANDIDATE_MODELS[0]
+        logger.info("OpenRouter active model initialized to: %s", _active_openrouter_model)
+
+    # 4. OpenAI Model Discovery
     if OPENAI_API_KEY:
         _active_openai_model = OPENAI_MODEL or "gpt-4o-mini"
         logger.info("OpenAI active model set to: %s", _active_openai_model)
 
 async def analyze_headline(title: str, summary: str, source: str) -> Dict[str, Any]:
-    """Runs LLM parsing using Groq -> OpenAI -> Quant Heuristic fallback."""
+    r"""
+    Runs LLM parsing using multi-provider automatic cascading fallback:
+    1. Groq (Llama-3.1-8b-instant, Llama-3.3-70b, Mixtral)
+    2. Google Gemini (Gemini 2.0 Flash, Gemini 1.5 Flash)
+    3. OpenRouter (Free models: Gemini 2.0 Flash Exp, Llama 3.3 70B, DeepSeek R1)
+    4. OpenAI (GPT-4o-Mini, GPT-4o)
+    5. Deterministic Quantitative Macro Heuristic Engine ($r = y - \pi$, DXY, flight-to-safety)
+    """
+    # 1. Groq
     parsed = await call_groq_llm(title, summary, source)
     if parsed and isinstance(parsed, dict) and "relevance" in parsed:
         return parsed
 
+    # 2. Google Gemini
+    parsed = await call_gemini_llm(title, summary, source)
+    if parsed and isinstance(parsed, dict) and "relevance" in parsed:
+        return parsed
+
+    # 3. OpenRouter
+    parsed = await call_openrouter_llm(title, summary, source)
+    if parsed and isinstance(parsed, dict) and "relevance" in parsed:
+        return parsed
+
+    # 4. OpenAI
     parsed = await call_openai_llm(title, summary, source)
     if parsed and isinstance(parsed, dict) and "relevance" in parsed:
         return parsed
 
+    # 5. Deterministic Quant Heuristic Engine
     return heuristic_quant_analysis(title, summary, source)
 
 # ---------------------------------------------------------------------------
@@ -723,6 +916,92 @@ async def fetch_rss_feed(feed_info: Dict[str, str]) -> List[Dict[str, Any]]:
         logger.error("Error fetching RSS feed %s: %s", name, e)
         return []
 
+def generate_macro_event_scenarios(title: str, summary: str, source: str, country: str = "USD") -> Dict[str, Any]:
+    """
+    Generates actionable institutional pre-event macro scenarios for Spot Gold (XAU/USD).
+    Provides exact bullish triggers, bearish triggers, pip volatility expectations,
+    and economic transmission mechanism for economic calendar releases.
+    """
+    t_lower = (title + " " + summary).lower()
+
+    if "cpi" in t_lower or "consumer price" in t_lower or "inflation" in t_lower:
+        return {
+            "event_type": "INFLATION",
+            "bullish_trigger": "Cooler than Forecast (< Forecast): Accelerates disinflation narrative -> Fed rate cut bets surge -> US 10Y TIPS real yields drop.",
+            "bullish_pip_target": "+25 to +50 pips rally",
+            "bearish_trigger": "Hotter than Forecast (> Forecast): Rekindles sticky inflation risk -> Fed higher-for-longer repricing -> DXY spikes.",
+            "bearish_pip_target": "-20 to -40 pips drop",
+            "transmission": "Real yields ($r = y - \\pi$) and DXY inverse valuation. Gold non-yielding demand surges as monetary easing probabilities advance.",
+            "expected_volatility": "High (35-50+ pips explosive)",
+            "key_correlated_asset": "US10Y TIPS Yields & DXY",
+        }
+    elif "ppi" in t_lower or "producer price" in t_lower:
+        return {
+            "event_type": "PRODUCER_INFLATION",
+            "bullish_trigger": "Below Forecast: Upstream wholesale disinflation feeds through to future core PCE easing -> Bullish bullion.",
+            "bullish_pip_target": "+15 to +30 pips rally",
+            "bearish_trigger": "Above Forecast: Upstream input costs pressure headline inflation -> Bearish Gold drift.",
+            "bearish_pip_target": "-15 to -25 pips drop",
+            "transmission": "Leading pipeline indicator for PCE. Lower PPI reduces terminal rate estimates, lowering opportunity cost of bullion holding.",
+            "expected_volatility": "Medium (20-35 pips)",
+            "key_correlated_asset": "2Y Treasury Yields & DXY",
+        }
+    elif "nfp" in t_lower or "non-farm" in t_lower or "unemployment" in t_lower or "jobless" in t_lower or "employment" in t_lower:
+        return {
+            "event_type": "LABOR_MARKET",
+            "bullish_trigger": "Weaker Payrolls / Higher Unemployment: Confirms cooling labor conditions -> Unlocks aggressive central bank cuts.",
+            "bullish_pip_target": "+30 to +60 pips explosive surge",
+            "bearish_trigger": "Blowout Payrolls / Wage Surge: Tight labor conditions delay rate cuts -> Dollar surges across G10 -> Gold dump.",
+            "bearish_pip_target": "-25 to -45 pips liquidation",
+            "transmission": "Dual mandate pivot. Central banks prioritize labor market stabilization when payrolls crack, fueling liquidity demand.",
+            "expected_volatility": "Critical (40-60+ pips violent)",
+            "key_correlated_asset": "DXY & Fed Funds Futures",
+        }
+    elif "fomc" in t_lower or "interest rate" in t_lower or "fed" in t_lower or "powell" in t_lower:
+        return {
+            "event_type": "CENTRAL_BANK",
+            "bullish_trigger": "Dovish Guidance / Rate Cut: Looser financial conditions and balance sheet expansion -> Bullion explosive breakout.",
+            "bullish_pip_target": "+35 to +70+ pips breakout",
+            "bearish_trigger": "Hawkish Hold / Pushback on Cuts: Higher terminal rate guidance and QT continuation -> Gold bears dominate.",
+            "bearish_pip_target": "-30 to -55 pips drop",
+            "transmission": "Direct cost-of-carry mechanism. Monetary easing decreases real returns on sovereign paper, elevating physical Gold premia.",
+            "expected_volatility": "Extreme (50-80+ pips regime shift)",
+            "key_correlated_asset": "Global Sovereign Yield Curve",
+        }
+    elif "gdp" in t_lower or "gross domestic" in t_lower:
+        return {
+            "event_type": "ECONOMIC_GROWTH",
+            "bullish_trigger": "Subpar Growth / Contraction: Stagflation or recession risk premia surge -> Flight-to-safety & expectation of stimulus.",
+            "bullish_pip_target": "+20 to +40 pips rally",
+            "bearish_trigger": "Strong Growth / Resilient Expansion: US economic exceptionalism boosts DXY -> Safe haven unwinding.",
+            "bearish_pip_target": "-15 to -30 pips drift",
+            "transmission": "Growth vs. Stagnation trade-off. Stagflationary slowdowns are historically the strongest macro catalyst for Gold outperformance.",
+            "expected_volatility": "High (25-40 pips)",
+            "key_correlated_asset": "Equities & DXY",
+        }
+    elif "retail sales" in t_lower or "consumer sentiment" in t_lower or "pce" in t_lower:
+        return {
+            "event_type": "CONSUMER_DEMAND",
+            "bullish_trigger": "Weak Consumer Data: Signals demand destruction -> Dovish Fed pivot expectations firm up.",
+            "bullish_pip_target": "+15 to +30 pips rally",
+            "bearish_trigger": "Robust Consumption: Sustained consumer spending keeps inflation pressures sticky -> Yields rise.",
+            "bearish_pip_target": "-15 to -25 pips drop",
+            "transmission": "Consumer health dictates aggregate demand and PCE inflation pass-through, influencing short-term Treasury curve pricing.",
+            "expected_volatility": "Medium (20-30 pips)",
+            "key_correlated_asset": "Real Yields & DXY",
+        }
+    else:
+        return {
+            "event_type": "MACRO_INDICATOR",
+            "bullish_trigger": f"Miss on consensus for {country} data prompts sovereign central bank accommodation and safe haven flows.",
+            "bullish_pip_target": "+10 to +25 pips drift",
+            "bearish_trigger": f"Beat on consensus demonstrates macro resilience, supporting sovereign currency and capping bullion gains.",
+            "bearish_pip_target": "-10 to -20 pips drift",
+            "transmission": "Cross-currency liquidity flows and comparative sovereign bond yield spreads relative to US Treasuries.",
+            "expected_volatility": "Moderate (15-25 pips)",
+            "key_correlated_asset": "Foreign Exchange Crosses & Spot Gold",
+        }
+
 # Economic Calendar In-Memory Cache (15-minute TTL)
 _calendar_cache: Dict[str, Any] = {"timestamp": 0.0, "items": []}
 
@@ -773,15 +1052,22 @@ async def fetch_economic_calendar() -> List[Dict[str, Any]]:
                         cal_epoch = time.time()
                         is_upcoming = False
 
+                    scenarios = generate_macro_event_scenarios(title, summary, "ForexFactory", country)
+
                     items.append({
                         "id": event_id,
                         "source": f"ForexFactory ({country})",
                         "title": f"Economic Release: {title}",
                         "summary": summary,
                         "link": link,
+                        "country": country,
+                        "impact": impact,
+                        "forecast": forecast or "N/A",
+                        "previous": previous or "N/A",
                         "published_at": date_str,
                         "published_epoch": cal_epoch,
                         "is_upcoming": is_upcoming,
+                        "macro_scenarios": scenarios,
                     })
             
             if items:
@@ -1173,6 +1459,10 @@ async def health_check():
         "active_sse_subscribers": len(hub.sse_subscribers),
         "groq_configured": bool(GROQ_API_KEY),
         "groq_active_model": _active_groq_model or (GROQ_CANDIDATE_MODELS[0] if GROQ_CANDIDATE_MODELS else None),
+        "gemini_configured": bool(GEMINI_API_KEY),
+        "gemini_active_model": _active_gemini_model or (GEMINI_CANDIDATE_MODELS[0] if GEMINI_CANDIDATE_MODELS else None),
+        "openrouter_configured": bool(OPENROUTER_API_KEY),
+        "openrouter_active_model": _active_openrouter_model or (OPENROUTER_CANDIDATE_MODELS[0] if OPENROUTER_CANDIDATE_MODELS else None),
         "openai_configured": bool(OPENAI_API_KEY),
         "openai_active_model": _active_openai_model or (OPENAI_CANDIDATE_MODELS[0] if OPENAI_CANDIDATE_MODELS else None),
         "telegram_configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),

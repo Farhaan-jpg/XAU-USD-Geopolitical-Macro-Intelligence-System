@@ -82,16 +82,34 @@ Add the following keys:
 |---|---|---|
 | `PYTHON_VERSION` | `3.11.9` | Ensures stable Linux build |
 | `POLL_INTERVAL_SECONDS` | `25` | Feed polling frequency in seconds |
-| `GROQ_API_KEY` | `gsk_...` | (Optional) High-speed Groq API key |
-| `GROQ_MODEL` | `llama-3.1-8b-instant` | (Optional) Primary Groq model. Auto-cascades to `llama-3.3-70b`, `llama-3.1-70b`, `mixtral`, `gemma2` |
-| `OPENAI_API_KEY` | `sk-...` | (Optional) Alternative LLM key |
+| `GROQ_API_KEY` | `gsk_...` | **Free Tier**: Get from [console.groq.com/keys](https://console.groq.com/keys) (Ultra-fast Llama-3.1-8b) |
+| `GROQ_MODEL` | `llama-3.1-8b-instant` | (Optional) Primary Groq model. Auto-cascades to `llama-3.3-70b`, `mixtral`, `gemma2` |
+| `GEMINI_API_KEY` | `AIzaSy...` | **Free Tier**: Get from [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) (Gemini 2.0 Flash / 1.5 Flash) |
+| `GEMINI_MODEL` | `gemini-2.0-flash` | (Optional) Defaults to `gemini-2.0-flash`, auto-cascades to `gemini-1.5-flash` |
+| `OPENROUTER_API_KEY` | `sk-or-v1-...` | **Free Tier**: Get from [openrouter.ai/keys](https://openrouter.ai/keys) (Access to free 70B & DeepSeek R1 models) |
+| `OPENROUTER_MODEL` | `google/gemini-2.0-flash-exp:free` | (Optional) Auto-cascades to `meta-llama/llama-3.3-70b-instruct:free`, `deepseek/deepseek-r1:free` |
+| `OPENAI_API_KEY` | `sk-...` | (Optional) OpenAI API key for GPT-4o-mini |
 | `OPENAI_MODEL` | `gpt-4o-mini` | (Optional) Defaults to `gpt-4o-mini`, auto-cascades to `gpt-4o`, `gpt-3.5-turbo` |
-| `TELEGRAM_BOT_TOKEN` | `123456:ABC...` | (Optional) Telegram bot token |
+| `TELEGRAM_BOT_TOKEN` | `123456:ABC...` | (Optional) Telegram bot token from `@BotFather` |
 | `TELEGRAM_CHAT_ID` | `-100...` or `@channel` | (Optional) Telegram channel or group ID |
+| `TELEGRAM_NOTIFY_ALL_EVENTS` | `true` | Set to `true` to receive Telegram alerts for 100% of events (CRITICAL, HIGH, MEDIUM, LOW) |
 
 > [!TIP]
-> **Resilient Multi-Model AI Cascade**:
-> If a Groq model is unavailable on your account tier (e.g. `llama-3.3-70b-versatile` returning 404), the engine automatically switches to `llama-3.1-8b-instant`, `llama-3.1-70b-versatile`, `mixtral-8x7b-32768`, or `gemma2-9b-it` without dropping events. If all LLMs are unreachable, it fails open to the **Deterministic Quantitative Macro Heuristic Engine** ($r = y - \pi$ real yields, safe-haven flight, DXY debasement) so the system never stops.
+> **Resilient Multi-Provider AI Cascade**:
+> The engine seamlessly cascades:
+> **Groq** (`llama-3.1-8b-instant`, `llama-3.3-70b`) → **Google Gemini** (`gemini-2.0-flash`, `gemini-1.5-flash`) → **OpenRouter** (`llama-3.3-70b:free`, `deepseek-r1:free`) → **OpenAI** (`gpt-4o-mini`) → **Deterministic Quantitative Macro Heuristic Engine** ($r = y - \pi$ real yields, safe-haven flight, DXY debasement).
+> Even if all external API keys expire or hit rate limits, the system fails open to the local quant heuristics and **never drops events or crashes**.
+
+### How to Get Free AI API Keys:
+1. **Groq (Fastest)**:
+   - Go to [console.groq.com](https://console.groq.com) → Sign up with Google/GitHub → Click **API Keys** → **Create API Key**.
+   - Copy key starting with `gsk_...`.
+2. **Google Gemini (Most Generous Free Limits)**:
+   - Go to [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) → Log in with Google → Click **Create API Key**.
+   - Copy key starting with `AIzaSy...`.
+3. **OpenRouter (Free Community Models)**:
+   - Go to [openrouter.ai](https://openrouter.ai) → Sign up → Go to [openrouter.ai/keys](https://openrouter.ai/keys) → Click **Create Key**.
+   - Copy key starting with `sk-or-v1-...`. Free models with `:free` suffix cost `$0.00`.
 
 Click **Save Changes**. Render will automatically build and deploy your app. Once deployed, Render will provide a public URL:
 `https://xauusd-intelligence.onrender.com`
