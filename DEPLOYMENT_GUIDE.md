@@ -80,24 +80,26 @@ Add the following keys:
 
 | Key | Value | Notes |
 |---|---|---|
-| `PYTHON_VERSION` | `3.11.9` | Ensures stable Linux build |
-| `POLL_INTERVAL_SECONDS` | `25` | Feed polling frequency in seconds |
-| `GROQ_API_KEY` | `gsk_...` | **Free Tier**: Get from [console.groq.com/keys](https://console.groq.com/keys) (Ultra-fast Llama-3.1-8b) |
-| `GROQ_MODEL` | `llama-3.1-8b-instant` | (Optional) Primary Groq model. Auto-cascades to `llama-3.3-70b`, `mixtral`, `gemma2` |
-| `GEMINI_API_KEY` | `AIzaSy...` | **Free Tier**: Get from [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) (Gemini 2.0 Flash / 1.5 Flash) |
-| `GEMINI_MODEL` | `gemini-2.0-flash` | (Optional) Defaults to `gemini-2.0-flash`, auto-cascades to `gemini-1.5-flash` |
-| `OPENROUTER_API_KEY` | `sk-or-v1-...` | **Free Tier**: Get from [openrouter.ai/keys](https://openrouter.ai/keys) (Access to free 70B & DeepSeek R1 models) |
-| `OPENROUTER_MODEL` | `google/gemini-2.0-flash-exp:free` | (Optional) Auto-cascades to `meta-llama/llama-3.3-70b-instruct:free`, `deepseek/deepseek-r1:free` |
-| `OPENAI_API_KEY` | `sk-...` | (Optional) OpenAI API key for GPT-4o-mini |
-| `OPENAI_MODEL` | `gpt-4o-mini` | (Optional) Defaults to `gpt-4o-mini`, auto-cascades to `gpt-4o`, `gpt-3.5-turbo` |
+| `GEMINI_API_KEY` | `AQ...` or `AIzaSy...` | **Priority 1**: Google AI Studio API key. Auto-discovers and cascades across `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-flash-lite-latest` |
+| `GEMINI_MODEL` | *(Optional)* | Custom Gemini model override (e.g. `gemini-3.5-flash-lite`) |
+| `OPENROUTER_API_KEY` | `sk-or-v1-...` | **Priority 2**: OpenRouter API key. Auto-discovers free `:free` models (`ling-3.0-flash-fin:free`, `nemotron-3.5-lightning:free`, `lfm-2.5:free`) |
+| `OPENROUTER_MODEL` | *(Optional)* | Custom OpenRouter model override |
+| `GROQ_API_KEY` | `gsk_...` | **Priority 3**: Groq Cloud key for ultra-fast LPU inference (`openai/gpt-oss-20b`, `qwen/qwen3.8-27b`, `groq/compound-mini`) |
+| `GROQ_MODEL` | *(Optional)* | Custom Groq model override |
+| `OPENAI_API_KEY` | `sk-...` | **Priority 4**: (Optional) OpenAI API key for `gpt-4o-mini`, `gpt-4o` |
 | `TELEGRAM_BOT_TOKEN` | `123456:ABC...` | (Optional) Telegram bot token from `@BotFather` |
 | `TELEGRAM_CHAT_ID` | `-100...` or `@channel` | (Optional) Telegram channel or group ID |
 | `TELEGRAM_NOTIFY_ALL_EVENTS` | `true` | Set to `true` to receive Telegram alerts for 100% of events (CRITICAL, HIGH, MEDIUM, LOW) |
 
 > [!TIP]
-> **Resilient Multi-Provider AI Cascade**:
-> The engine seamlessly cascades:
-> **Groq** (`llama-3.1-8b-instant`, `llama-3.3-70b`) → **Google Gemini** (`gemini-2.0-flash`, `gemini-1.5-flash`) → **OpenRouter** (`llama-3.3-70b:free`, `deepseek-r1:free`) → **OpenAI** (`gpt-4o-mini`) → **Deterministic Quantitative Macro Heuristic Engine** ($r = y - \pi$ real yields, safe-haven flight, DXY debasement).
+> **Strict Cascading Priority Architecture**:
+> 1. **Google Gemini** (Priority 1: `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-flash-lite-latest`)
+> 2. **OpenRouter** (Priority 2: Permanent free community models: `inclusionai/ling-3.0-flash-fin:free`, `nvidia/nemotron-3.5-lightning:free`, `liquid/lfm-2.5-2.6b:free`)
+> 3. **Groq Cloud** (Priority 3: Ultra-fast LPU inference: `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`, `groq/compound-mini`)
+> 4. **OpenAI** (Priority 4: `gpt-4o-mini`, `gpt-4o`)
+> 5. **Deterministic Quantitative Macro Heuristic Engine** (Priority 5: Guaranteed zero-drop fail-open: $r = y - \pi$ real interest rates, safe-haven flight, DXY debasement).
+>
+> On startup and at runtime, the engine dynamically fetches the running available models from the provider APIs in real time, so you never encounter 404 deprecated model errors!
 > Even if all external API keys expire or hit rate limits, the system fails open to the local quant heuristics and **never drops events or crashes**.
 
 ### How to Get Free AI API Keys:

@@ -209,13 +209,8 @@
             <i id="voice-icon" data-lucide="mic" class="w-3.5 h-3.5 text-indigo-300"></i>
             <span id="voice-pulse" class="hidden absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
           </div>
-          <span class="text-[11px] font-mono font-semibold hidden md:inline">SQUAWK:</span>
+          <span class="text-[11px] font-mono font-semibold hidden md:inline">VOICE SQUAWK:</span>
           <span id="voice-status-text" class="text-[11px] font-mono font-bold text-emerald-400">ON</span>
-        </button>
-
-        <!-- Sound Chime Toggle -->
-        <button id="sound-toggle-btn" class="p-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-gold-accent hover:border-gold-accent/40 transition-colors" title="Toggle Web Audio Chime Alerts">
-          <i id="sound-icon" data-lucide="volume-2" class="w-4 h-4"></i>
         </button>
 
         <!-- Simulate Flash Scenario -->
@@ -574,45 +569,11 @@
     let allEvents = [];
     let activeFilter = 'all';
     let searchQuery = '';
-    let isSoundEnabled = localStorage.getItem('aureus_sound') !== 'false';
     let ws = null;
     let eventSource = null;
     let countdownSeconds = 25;
     let pollIntervalVal = 25;
     let lastPingTime = Date.now();
-
-    // Web Audio Synthesizer
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-    function playAlertChime(severity) {
-      if (!isSoundEnabled) return;
-      try {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        const now = audioCtx.currentTime;
-
-        if (severity === 'CRITICAL') {
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(880, now);
-          osc.frequency.setValueAtTime(1320, now + 0.1);
-          gain.gain.setValueAtTime(0.2, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-          osc.start(now);
-          osc.stop(now + 0.45);
-        } else {
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(659.25, now);
-          osc.frequency.setValueAtTime(880, now + 0.12);
-          gain.gain.setValueAtTime(0.15, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-          osc.start(now);
-          osc.stop(now + 0.35);
-        }
-      } catch (e) {}
-    }
 
     function renderIcons() {
       if (window.lucide) window.lucide.createIcons();
@@ -1052,11 +1013,7 @@
         sortEventsDescending(allEvents);
         if (allEvents.length > 80) allEvents.pop();
 
-        if (event.severity === 'CRITICAL' || event.severity === 'HIGH') {
-          playAlertChime(event.severity);
-        }
-
-        // Automatic Zero-Delay Voice Update
+        // Automatic Zero-Delay Voice Update on Every Event
         voiceSquawk.speakEvent(event);
 
         renderFeed();
@@ -1445,28 +1402,6 @@
         });
       }
 
-      // Sound Chime Toggle
-      const soundBtn = document.getElementById('sound-toggle-btn');
-      const soundIcon = document.getElementById('sound-icon');
-      function updateSoundUi() {
-        if (isSoundEnabled) {
-          soundIcon.setAttribute('data-lucide', 'volume-2');
-          soundBtn.classList.add('text-gold-accent');
-        } else {
-          soundIcon.setAttribute('data-lucide', 'volume-x');
-          soundBtn.classList.remove('text-gold-accent');
-        }
-        renderIcons();
-      }
-      updateSoundUi();
-
-      soundBtn.addEventListener('click', () => {
-        isSoundEnabled = !isSoundEnabled;
-        localStorage.setItem('aureus_sound', isSoundEnabled);
-        updateSoundUi();
-        if (isSoundEnabled) playAlertChime('LOW');
-      });
-
       // Search Box (instant keyup)
       document.getElementById('search-input').addEventListener('input', (e) => {
         searchQuery = e.target.value;
@@ -1570,18 +1505,18 @@
       await fetchInitialEvents();
       initRealtimeStream();
 
-      // Check configured engine and display active AI model
+      // Check configured engine and display active AI model (Priority: Gemini -> OpenRouter -> Groq -> OpenAI)
       fetch('/healthz').then(r => r.json()).then(h => {
         const badge = document.getElementById('engine-model-badge');
-        if (h.groq_configured) {
-          const modelTag = h.groq_active_model ? h.groq_active_model.replace('llama-', 'Llama-').replace('llama', 'Llama-') : 'Active';
-          badge.textContent = `Groq (${modelTag})`;
-        } else if (h.gemini_configured) {
-          const modelTag = h.gemini_active_model ? h.gemini_active_model.replace('gemini-', 'Gemini-') : '2.0-Flash';
-          badge.textContent = `Gemini (${modelTag})`;
+        if (h.gemini_configured) {
+          const modelTag = h.gemini_active_model ? h.gemini_active_model.replace('gemini-', 'Gemini-') : 'Flash';
+          badge.textContent = `Google Gemini (${modelTag})`;
         } else if (h.openrouter_configured) {
           const modelTag = h.openrouter_active_model ? h.openrouter_active_model.split('/').pop().replace(':free', '') : 'Free';
           badge.textContent = `OpenRouter (${modelTag})`;
+        } else if (h.groq_configured) {
+          const modelTag = h.groq_active_model ? h.groq_active_model.split('/').pop() : 'Active';
+          badge.textContent = `Groq LPU (${modelTag})`;
         } else if (h.openai_configured) {
           badge.textContent = `OpenAI (${h.openai_active_model || 'GPT-4o'})`;
         } else {

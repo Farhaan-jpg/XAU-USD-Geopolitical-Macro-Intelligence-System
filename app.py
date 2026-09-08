@@ -42,11 +42,11 @@ POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "25"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "").strip()
 
-# Google Gemini Credentials & Models
+# Google Gemini Credentials & Models (Priority 1: Free Tier via AI Studio)
 GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip()
 
-# OpenRouter Credentials & Models (Free community models prioritized)
+# OpenRouter Credentials & Models (Priority 2: Permanent $0.00 free models)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "").strip()
 
@@ -54,34 +54,34 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "").strip()
 
 # Resilient Model Cascades for Automatic Fallbacks
-# 1. Groq Cascade (Ultra-low latency inference)
-GROQ_CANDIDATE_MODELS = [m for m in [
-    GROQ_MODEL,
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
-    "llama-3.1-70b-versatile",
-    "llama-3.2-11b-vision-preview",
-    "llama-3.2-3b-preview",
-    "llama-3.2-1b-preview",
-    "mixtral-8x7b-32768",
-    "gemma2-9b-it",
-    "llama3-70b-8192",
-    "llama3-8b-8192",
-] if m]
-
-# 2. Google Gemini Cascade (Generous free tier via AI Studio)
+# 1. Google Gemini Cascade (Priority 1)
 GEMINI_CANDIDATE_MODELS = [m for m in [
     GEMINI_MODEL,
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-flash-latest",
+    "gemma-4-26b-a4b-it",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
-    "gemini-1.5-pro",
-    "gemini-2.0-flash-exp",
 ] if m]
 
-# 3. OpenRouter Cascade (Free community models)
+# 2. OpenRouter Cascade (Priority 2: Permanent Free Community Models)
 OPENROUTER_CANDIDATE_MODELS = [m for m in [
     OPENROUTER_MODEL,
-    "google/gemini-2.0-flash-exp:free",
+    "inclusionai/ling-3.0-flash-fin:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "poolside/laguna-s-2.1:free",
+    "cohere/north-mini-code:free",
+    "dots-studio/dots-3-note-preview:free",
+    "inclusionai/ling-3.0-flash-sante:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-4-31b-it:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "meta-llama/llama-3.1-8b-instruct:free",
     "mistralai/mistral-7b-instruct:free",
@@ -89,7 +89,21 @@ OPENROUTER_CANDIDATE_MODELS = [m for m in [
     "openrouter/auto",
 ] if m]
 
-# 4. OpenAI Cascade
+# 3. Groq Cascade (Priority 3: Ultra-low latency LPUs)
+GROQ_CANDIDATE_MODELS = [m for m in [
+    GROQ_MODEL,
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
+    "qwen/qwen3.6-27b",
+    "groq/compound-mini",
+    "allam-2-7b",
+    "groq/compound",
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+] if m]
+
+# 4. OpenAI Cascade (Priority 4)
 OPENAI_CANDIDATE_MODELS = [m for m in [
     OPENAI_MODEL,
     "gpt-4o-mini",
@@ -98,9 +112,9 @@ OPENAI_CANDIDATE_MODELS = [m for m in [
 ] if m]
 
 # Runtime working model cache
-_active_groq_model: Optional[str] = None
 _active_gemini_model: Optional[str] = None
 _active_openrouter_model: Optional[str] = None
+_active_groq_model: Optional[str] = None
 _active_openai_model: Optional[str] = None
 
 # Telegram Notifications
@@ -526,63 +540,30 @@ def heuristic_quant_analysis(title: str, summary: str, source: str) -> Dict[str,
             }
         }
 
-async def call_groq_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
-    """Calls Groq API with automatic cascading fallback across candidate models."""
-    global _active_groq_model
-    if not GROQ_API_KEY:
+def _clean_llm_json(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Safely cleans and parses JSON from any LLM response, stripping markdown fences or preamble."""
+    if not raw_text:
         return None
-
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
-
-    models_to_try = [_active_groq_model] if _active_groq_model else []
-    for m in GROQ_CANDIDATE_MODELS:
-        if m not in models_to_try:
-            models_to_try.append(m)
-
-    for model_name in models_to_try:
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": LLM_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.1,
-            "max_tokens": 600,
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.post(url, headers=headers, json=payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    raw_json = data["choices"][0]["message"]["content"]
-                    parsed = json.loads(raw_json)
-                    if _active_groq_model != model_name:
-                        logger.info("Groq model active & verified: %s", model_name)
-                        _active_groq_model = model_name
-                    return parsed
-                elif resp.status_code in [404, 400]:
-                    # Model not found or not supported on this tier -> try next model in fallback cascade
-                    if _active_groq_model == model_name:
-                        _active_groq_model = None
-                    logger.warning("Groq model '%s' unavailable (status %d). Automatically switching to fallback model...", model_name, resp.status_code)
-                    continue
-                else:
-                    logger.warning("Groq API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
-        except Exception as e:
-            logger.error("Groq API call error with model %s: %s", model_name, e)
-            continue
-
+    text = raw_text.strip()
+    if "```" in text:
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+        if match:
+            text = match.group(1).strip()
+    if not text.startswith("{"):
+        start_idx = text.find("{")
+        end_idx = text.rfind("}")
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            text = text[start_idx:end_idx + 1]
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
     return None
 
 async def call_gemini_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
-    """Calls Google Gemini API with automatic cascading fallback across candidate models."""
+    """Calls Google Gemini API (Priority 1) with automatic cascading fallback across candidate models."""
     global _active_gemini_model
     if not GEMINI_API_KEY:
         return None
@@ -607,7 +588,7 @@ async def call_gemini_llm(title: str, summary: str, source: str) -> Optional[Dic
         }
 
         try:
-            async with httpx.AsyncClient(timeout=9.0) as client:
+            async with httpx.AsyncClient(timeout=7.0) as client:
                 resp = await client.post(url, json=payload)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -615,13 +596,13 @@ async def call_gemini_llm(title: str, summary: str, source: str) -> Optional[Dic
                     if candidates and "content" in candidates[0]:
                         parts = candidates[0]["content"].get("parts", [])
                         if parts and "text" in parts[0]:
-                            raw_json = parts[0]["text"]
-                            parsed = json.loads(raw_json)
-                            if _active_gemini_model != model_name:
-                                logger.info("Google Gemini model active & verified: %s", model_name)
-                                _active_gemini_model = model_name
-                            return parsed
-                elif resp.status_code in [404, 400, 429]:
+                            parsed = _clean_llm_json(parts[0]["text"])
+                            if parsed and "relevance" in parsed:
+                                if _active_gemini_model != model_name:
+                                    logger.info("Google Gemini model active & verified: %s", model_name)
+                                    _active_gemini_model = model_name
+                                return parsed
+                elif resp.status_code in [404, 400, 429, 503]:
                     if _active_gemini_model == model_name:
                         _active_gemini_model = None
                     logger.warning("Google Gemini model '%s' returned status %d. Switching to fallback...", model_name, resp.status_code)
@@ -635,7 +616,7 @@ async def call_gemini_llm(title: str, summary: str, source: str) -> Optional[Dic
     return None
 
 async def call_openrouter_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
-    """Calls OpenRouter API with automatic cascading fallback across free candidate models."""
+    """Calls OpenRouter API (Priority 2) with automatic cascading fallback across free candidate models."""
     global _active_openrouter_model
     if not OPENROUTER_API_KEY:
         return None
@@ -644,6 +625,7 @@ async def call_openrouter_llm(title: str, summary: str, source: str) -> Optional
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "HTTP-Referer": "https://github.com/Farhaan-jpg/XAU-USD-Geopolitical-Macro-Intelligence-System",
         "X-Title": "XAUUSD Macro Intelligence System",
     }
@@ -661,23 +643,23 @@ async def call_openrouter_llm(title: str, summary: str, source: str) -> Optional
                 {"role": "system", "content": LLM_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
-            "response_format": {"type": "json_object"},
             "temperature": 0.1,
             "max_tokens": 600,
         }
 
         try:
-            async with httpx.AsyncClient(timeout=9.0) as client:
+            async with httpx.AsyncClient(timeout=7.5) as client:
                 resp = await client.post(url, headers=headers, json=payload)
                 if resp.status_code == 200:
                     data = resp.json()
                     raw_json = data["choices"][0]["message"]["content"]
-                    parsed = json.loads(raw_json)
-                    if _active_openrouter_model != model_name:
-                        logger.info("OpenRouter model active & verified: %s", model_name)
-                        _active_openrouter_model = model_name
-                    return parsed
-                elif resp.status_code in [404, 400, 429]:
+                    parsed = _clean_llm_json(raw_json)
+                    if parsed and "relevance" in parsed:
+                        if _active_openrouter_model != model_name:
+                            logger.info("OpenRouter model active & verified: %s", model_name)
+                            _active_openrouter_model = model_name
+                        return parsed
+                elif resp.status_code in [404, 400, 429, 403]:
                     if _active_openrouter_model == model_name:
                         _active_openrouter_model = None
                     logger.warning("OpenRouter model '%s' returned status %d. Switching to fallback...", model_name, resp.status_code)
@@ -690,8 +672,64 @@ async def call_openrouter_llm(title: str, summary: str, source: str) -> Optional
 
     return None
 
+async def call_groq_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
+    """Calls Groq API (Priority 3) with automatic cascading fallback across candidate models."""
+    global _active_groq_model
+    if not GROQ_API_KEY:
+        return None
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
+    }
+    user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
+
+    models_to_try = [_active_groq_model] if _active_groq_model else []
+    for m in GROQ_CANDIDATE_MODELS:
+        if m not in models_to_try:
+            models_to_try.append(m)
+
+    for model_name in models_to_try:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": LLM_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+            "max_tokens": 600,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=7.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw_json = data["choices"][0]["message"]["content"]
+                    parsed = _clean_llm_json(raw_json)
+                    if parsed and "relevance" in parsed:
+                        if _active_groq_model != model_name:
+                            logger.info("Groq model active & verified: %s", model_name)
+                            _active_groq_model = model_name
+                        return parsed
+                elif resp.status_code in [404, 400, 429]:
+                    if _active_groq_model == model_name:
+                        _active_groq_model = None
+                    logger.warning("Groq model '%s' unavailable (status %d). Automatically switching to fallback model...", model_name, resp.status_code)
+                    continue
+                else:
+                    logger.warning("Groq API returned status %d with model %s: %s", resp.status_code, model_name, resp.text[:120])
+        except Exception as e:
+            logger.error("Groq API call error with model %s: %s", model_name, e)
+            continue
+
+    return None
+
 async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dict[str, Any]]:
-    """Calls OpenAI API with automatic cascading fallback across candidate models."""
+    """Calls OpenAI API (Priority 4) with automatic cascading fallback across candidate models."""
     global _active_openai_model
     if not OPENAI_API_KEY:
         return None
@@ -700,6 +738,7 @@ async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dic
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     }
     user_content = f"Source: {source}\nHeadline: {title}\nSummary: {summary}\nAnalyze the immediate XAU/USD impact."
 
@@ -726,11 +765,12 @@ async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dic
                 if resp.status_code == 200:
                     data = resp.json()
                     raw_json = data["choices"][0]["message"]["content"]
-                    parsed = json.loads(raw_json)
-                    if _active_openai_model != model_name:
-                        logger.info("OpenAI model active & verified: %s", model_name)
-                        _active_openai_model = model_name
-                    return parsed
+                    parsed = _clean_llm_json(raw_json)
+                    if parsed and "relevance" in parsed:
+                        if _active_openai_model != model_name:
+                            logger.info("OpenAI model active & verified: %s", model_name)
+                            _active_openai_model = model_name
+                        return parsed
                 elif resp.status_code in [404, 400]:
                     if _active_openai_model == model_name:
                         _active_openai_model = None
@@ -745,76 +785,156 @@ async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dic
     return None
 
 async def auto_select_working_ai_models():
-    """Proactively checks and caches the best accessible models on startup."""
-    global _active_groq_model, _active_gemini_model, _active_openrouter_model, _active_openai_model
+    """Proactively discovers and caches the best running, available models from Google, OpenRouter, and Groq in real time."""
+    global _active_gemini_model, _active_openrouter_model, _active_groq_model, _active_openai_model
+    global GEMINI_CANDIDATE_MODELS, OPENROUTER_CANDIDATE_MODELS, GROQ_CANDIDATE_MODELS
 
-    # 1. Groq Model Discovery
-    if GROQ_API_KEY:
+    # 1. Google Gemini Real-Time Discovery (Priority 1)
+    if GEMINI_API_KEY:
         try:
-            url = "https://api.groq.com/openai/v1/models"
-            headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
-            async with httpx.AsyncClient(timeout=4.0) as client:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    discovered_gemini = [
+                        m.get("name", "").replace("models/", "")
+                        for m in data.get("models", [])
+                        if "generateContent" in m.get("supportedGenerationMethods", [])
+                        and any(sub in m.get("name", "") for sub in ["flash", "gemma", "pro"])
+                        and "tts" not in m.get("name", "")
+                        and "image" not in m.get("name", "")
+                        and "preview-1" not in m.get("name", "")
+                    ]
+                    if discovered_gemini:
+                        pref_gemini = [
+                            "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
+                            "gemini-flash-lite-latest", "gemini-3.5-flash", "gemma-4-26b-a4b-it", "gemma-4-31b-it"
+                        ]
+                        ordered_gemini = [m for m in pref_gemini if m in discovered_gemini]
+                        for m in discovered_gemini:
+                            if m not in ordered_gemini:
+                                ordered_gemini.append(m)
+                        GEMINI_CANDIDATE_MODELS = ordered_gemini
+                        _active_gemini_model = GEMINI_CANDIDATE_MODELS[0]
+                        logger.info("Real-time Gemini models fetched (%d available): Primary -> %s", len(GEMINI_CANDIDATE_MODELS), _active_gemini_model)
+        except Exception as e:
+            logger.warning("Could not fetch real-time Gemini models: %s. Using candidate cascade.", e)
+        if not _active_gemini_model and GEMINI_CANDIDATE_MODELS:
+            _active_gemini_model = GEMINI_CANDIDATE_MODELS[0]
+            logger.info("Google Gemini active model set to primary candidate: %s", _active_gemini_model)
+
+    # 2. OpenRouter Real-Time Free Model Discovery (Priority 2)
+    if OPENROUTER_API_KEY:
+        try:
+            url = "https://openrouter.ai/api/v1/models"
+            headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "User-Agent": "Mozilla/5.0"}
+            async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
-                    available_ids = {m.get("id") for m in data.get("data", []) if isinstance(m, dict)}
-                    for candidate in GROQ_CANDIDATE_MODELS:
-                        if candidate in available_ids:
-                            _active_groq_model = candidate
-                            logger.info("Groq active AI model verified via account scan: %s", candidate)
-                            break
+                    free_discovered = [
+                        m.get("id") for m in data.get("data", [])
+                        if isinstance(m, dict) and ":free" in m.get("id", "")
+                    ]
+                    if free_discovered:
+                        pref_free = [
+                            "inclusionai/ling-3.0-flash-fin:free",
+                            "nvidia/nemotron-3.5-lightning:free",
+                            "liquid/lfm-2.5-2.6b:free",
+                            "poolside/laguna-s-2.1:free",
+                            "cohere/north-mini-code:free",
+                            "dots-studio/dots-3-note-preview:free",
+                            "inclusionai/ling-3.0-flash-sante:free",
+                            "google/gemma-4-26b-a4b-it:free",
+                        ]
+                        ordered_free = [m for m in pref_free if m in free_discovered]
+                        for m in free_discovered:
+                            if m not in ordered_free:
+                                ordered_free.append(m)
+                        OPENROUTER_CANDIDATE_MODELS = ordered_free
+                        _active_openrouter_model = OPENROUTER_CANDIDATE_MODELS[0]
+                        logger.info("Real-time OpenRouter free models fetched (%d available): Primary -> %s", len(OPENROUTER_CANDIDATE_MODELS), _active_openrouter_model)
         except Exception as e:
-            logger.debug("Groq auto-discovery check error: %s", e)
+            logger.warning("Could not fetch real-time OpenRouter models: %s. Using candidate cascade.", e)
+        if not _active_openrouter_model and OPENROUTER_CANDIDATE_MODELS:
+            _active_openrouter_model = OPENROUTER_CANDIDATE_MODELS[0]
+            logger.info("OpenRouter active model set to primary candidate: %s", _active_openrouter_model)
 
+    # 3. Groq Real-Time Model Discovery (Priority 3)
+    if GROQ_API_KEY:
+        try:
+            url = "https://api.groq.com/openai/v1/models"
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "User-Agent": "Mozilla/5.0"}
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    groq_discovered = [
+                        m.get("id") for m in data.get("data", [])
+                        if isinstance(m, dict) and m.get("active", True)
+                        and "whisper" not in m.get("id", "")
+                        and "guard" not in m.get("id", "")
+                    ]
+                    if groq_discovered:
+                        pref_groq = [
+                            "openai/gpt-oss-20b",
+                            "openai/gpt-oss-120b",
+                            "qwen/qwen3.8-27b",
+                            "qwen/qwen3.6-27b",
+                            "groq/compound-mini",
+                            "allam-2-7b",
+                            "groq/compound",
+                        ]
+                        ordered_groq = [m for m in pref_groq if m in groq_discovered]
+                        for m in groq_discovered:
+                            if m not in ordered_groq:
+                                ordered_groq.append(m)
+                        GROQ_CANDIDATE_MODELS = ordered_groq
+                        _active_groq_model = GROQ_CANDIDATE_MODELS[0]
+                        logger.info("Real-time Groq models fetched (%d available): Primary -> %s", len(GROQ_CANDIDATE_MODELS), _active_groq_model)
+        except Exception as e:
+            logger.warning("Could not fetch real-time Groq models: %s. Using candidate cascade.", e)
         if not _active_groq_model and GROQ_CANDIDATE_MODELS:
             _active_groq_model = GROQ_CANDIDATE_MODELS[0]
-            logger.info("Groq active model initialized to primary candidate: %s", _active_groq_model)
+            logger.info("Groq active model set to primary candidate: %s", _active_groq_model)
 
-    # 2. Google Gemini Model Discovery
-    if GEMINI_API_KEY:
-        _active_gemini_model = GEMINI_MODEL or GEMINI_CANDIDATE_MODELS[0]
-        logger.info("Google Gemini active model initialized to: %s", _active_gemini_model)
-
-    # 3. OpenRouter Model Discovery
-    if OPENROUTER_API_KEY:
-        _active_openrouter_model = OPENROUTER_MODEL or OPENROUTER_CANDIDATE_MODELS[0]
-        logger.info("OpenRouter active model initialized to: %s", _active_openrouter_model)
-
-    # 4. OpenAI Model Discovery
+    # 4. OpenAI Model Discovery (Priority 4)
     if OPENAI_API_KEY:
         _active_openai_model = OPENAI_MODEL or "gpt-4o-mini"
         logger.info("OpenAI active model set to: %s", _active_openai_model)
 
 async def analyze_headline(title: str, summary: str, source: str) -> Dict[str, Any]:
     r"""
-    Runs LLM parsing using multi-provider automatic cascading fallback:
-    1. Groq (Llama-3.1-8b-instant, Llama-3.3-70b, Mixtral)
-    2. Google Gemini (Gemini 2.0 Flash, Gemini 1.5 Flash)
-    3. OpenRouter (Free models: Gemini 2.0 Flash Exp, Llama 3.3 70B, DeepSeek R1)
-    4. OpenAI (GPT-4o-Mini, GPT-4o)
-    5. Deterministic Quantitative Macro Heuristic Engine ($r = y - \pi$, DXY, flight-to-safety)
+    Runs LLM parsing using multi-provider automatic cascading fallback.
+    STRICT USER PRIORITY:
+    1. Google Gemini (Priority 1: Gemini-3.6-Flash, Gemini-3.5-Flash-Lite, etc.)
+    2. OpenRouter (Priority 2: Free models ending with :free)
+    3. Groq (Priority 3: Ultra-fast LPUs with gpt-oss-20b, qwen, compound)
+    4. OpenAI (Priority 4: GPT-4o-Mini, GPT-4o)
+    5. Deterministic Quantitative Macro Heuristic Engine (Priority 5: $r = y - \pi$, DXY, flight-to-safety)
     """
-    # 1. Groq
-    parsed = await call_groq_llm(title, summary, source)
-    if parsed and isinstance(parsed, dict) and "relevance" in parsed:
-        return parsed
-
-    # 2. Google Gemini
+    # 1. Google Gemini (PRIORITY 1)
     parsed = await call_gemini_llm(title, summary, source)
     if parsed and isinstance(parsed, dict) and "relevance" in parsed:
         return parsed
 
-    # 3. OpenRouter
+    # 2. OpenRouter (PRIORITY 2)
     parsed = await call_openrouter_llm(title, summary, source)
     if parsed and isinstance(parsed, dict) and "relevance" in parsed:
         return parsed
 
-    # 4. OpenAI
+    # 3. Groq (PRIORITY 3)
+    parsed = await call_groq_llm(title, summary, source)
+    if parsed and isinstance(parsed, dict) and "relevance" in parsed:
+        return parsed
+
+    # 4. OpenAI (PRIORITY 4)
     parsed = await call_openai_llm(title, summary, source)
     if parsed and isinstance(parsed, dict) and "relevance" in parsed:
         return parsed
 
-    # 5. Deterministic Quant Heuristic Engine
+    # 5. Deterministic Quant Heuristic Engine (PRIORITY 5 - Guaranteed Zero Drop)
     return heuristic_quant_analysis(title, summary, source)
 
 # ---------------------------------------------------------------------------
