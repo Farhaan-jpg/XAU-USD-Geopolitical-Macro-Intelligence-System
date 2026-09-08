@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AUREUS // XAU/USD Real-Time Geopolitical & Macro Intelligence</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            obsidian: '#09090b',
+            surface: '#121215',
+            surfaceBorder: '#27272a',
+            gold: {
+              accent: '#D4AF37',
+              bright: '#FACC15',
+              glow: 'rgba(212, 175, 55, 0.25)',
+            },
+            bullish: '#10B981',
+            bearish: '#F43F5E',
+          },
+          animation: {
+            'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'slide-in': 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+            'flash-green': 'flashGreen 0.6s ease-out',
+            'flash-red': 'flashRed 0.6s ease-out',
+          },
+          keyframes: {
+            slideIn: {
+              '0%': { opacity: '0', transform: 'translateY(-14px) scale(0.98)' },
+              '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+            },
+            flashGreen: {
+              '0%': { backgroundColor: 'rgba(16, 185, 129, 0.35)', color: '#34d399' },
+              '100%': { backgroundColor: 'transparent' },
+            },
+            flashRed: {
+              '0%': { backgroundColor: 'rgba(244, 63, 94, 0.35)', color: '#fb7185' },
+              '100%': { backgroundColor: 'transparent' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #09090b;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(212, 175, 55, 0.06) 0px, transparent 45%),
+        radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.04) 0px, transparent 50%),
+        radial-gradient(at 50% 50%, rgba(14, 165, 233, 0.02) 0px, transparent 60%);
+      color: #f4f4f5;
+    }
+    .glass-card {
+      background: rgba(18, 18, 22, 0.8);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(39, 39, 42, 0.85);
+    }
+    .glass-card:hover {
+      border-color: rgba(212, 175, 55, 0.4);
+    }
+    .glow-gold {
+      box-shadow: 0 0 20px -3px rgba(212, 175, 55, 0.22);
+    }
+    .glow-critical {
+      box-shadow: 0 0 24px -2px rgba(244, 63, 94, 0.4);
+    }
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #09090b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #27272a;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #3f3f46;
+    }
+  </style>
+</head>
+<body class="min-h-screen font-sans antialiased text-zinc-100 flex flex-col selection:bg-gold-accent/30 selection:text-amber-200">
+
+  <!-- ================= 1. GLOBAL MARKET SESSIONS TICKER BAR ================= -->
+  <div class="border-b border-zinc-900 bg-obsidian/95 px-4 lg:px-8 py-1.5 text-[11px] font-mono text-zinc-400">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+      
+      <!-- Session Clocks -->
+      <div class="flex flex-wrap items-center gap-4">
+        <div class="flex items-center gap-1.5">
+          <span class="text-zinc-500">UTC:</span>
+          <span id="clock-utc" class="text-zinc-200 font-semibold">00:00:00</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span id="badge-london" class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
+          <span class="text-zinc-500">LONDON:</span>
+          <span id="clock-london" class="text-zinc-200">00:00</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span id="badge-ny" class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
+          <span class="text-zinc-500">NEW YORK (COMEX):</span>
+          <span id="clock-ny" class="text-zinc-200">00:00</span>
+        </div>
+        <div class="flex items-center gap-1.5 hidden sm:flex">
+          <span id="badge-tokyo" class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
+          <span class="text-zinc-500">TOKYO:</span>
+          <span id="clock-tokyo" class="text-zinc-200">00:00</span>
+        </div>
+        <div id="overlap-indicator" class="hidden text-[10px] px-2 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold animate-pulse">
+          ⚡ PEAK GOLD VOLATILITY (LDN / NY OVERLAP)
+        </div>
+      </div>
+
+      <!-- Live Pipeline Protocol -->
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-1.5 text-zinc-400">
+          <span id="protocol-badge" class="px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px]">WEBSOCKET</span>
+          <span id="conn-latency-text" class="text-zinc-500">0ms latency</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ================= 2. MAIN HEADER & SPOT PRICE TICKER ================= -->
+  <header class="sticky top-0 z-50 border-b border-surfaceBorder bg-obsidian/90 backdrop-blur-md px-4 lg:px-8 py-3">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+      
+      <!-- Brand & Status -->
+      <div class="flex items-center justify-between md:justify-start gap-3">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-yellow-600/30 border border-gold-accent/50 flex items-center justify-center glow-gold">
+            <i data-lucide="shield-alert" class="w-5 h-5 text-gold-accent"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="font-mono font-bold tracking-wider text-base text-zinc-100">AUREUS</span>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-gold-accent/10 text-gold-accent border border-gold-accent/30 font-mono font-semibold">XAU/USD QUANT INTELLIGENCE</span>
+            </div>
+            <p class="text-[11px] text-zinc-400 font-mono">Zero-Latency Event-Driven Macro Engine</p>
+          </div>
+        </div>
+
+        <!-- Mobile Real-Time Indicator -->
+        <div class="flex items-center gap-1.5 md:hidden">
+          <span id="mobile-live-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse-fast"></span>
+        </div>
+      </div>
+
+      <!-- Live XAU/USD Spot Price Widget -->
+      <div class="flex items-center justify-between md:justify-center gap-3 px-4 py-1.5 rounded-xl bg-zinc-900/90 border border-zinc-800 shadow-inner">
+        <div class="flex items-center gap-2">
+          <span class="font-mono font-bold text-xs text-amber-400">SPOT XAU/USD:</span>
+          <span id="ticker-price" class="text-lg font-mono font-extrabold tracking-tight text-zinc-100 transition-colors px-1 rounded">
+            $2,654.50
+          </span>
+          <span id="ticker-delta-pill" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
+            ▲ +0.20
+          </span>
+        </div>
+
+        <div class="hidden sm:flex items-center gap-3 text-[11px] font-mono border-l border-zinc-800 pl-3 text-zinc-400">
+          <div>BID: <span id="ticker-bid" class="text-zinc-200">2,654.30</span></div>
+          <div>ASK: <span id="ticker-ask" class="text-zinc-200">2,654.65</span></div>
+          <div>SPREAD: <span id="ticker-spread" class="text-amber-300">0.35</span></div>
+          <div class="hidden lg:block text-zinc-500">RANGE: <span id="ticker-range" class="text-zinc-300">2642.10 - 2668.20</span></div>
+        </div>
+      </div>
+
+      <!-- Action Controls -->
+      <div class="flex items-center justify-end gap-2 sm:gap-3">
+        
+        <!-- Live Countdown Timer -->
+        <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-[11px] font-mono text-zinc-300" title="Time until next parallel feed sync">
+          <i data-lucide="timer" class="w-3.5 h-3.5 text-gold-accent"></i>
+          <span>SYNC: <span id="sync-countdown-text" class="text-amber-400 font-bold">25s</span></span>
+        </div>
+
+        <!-- Sound Toggle -->
+        <button id="sound-toggle-btn" class="p-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-gold-accent hover:border-gold-accent/40 transition-colors" title="Toggle Web Audio Chime Alerts">
+          <i id="sound-icon" data-lucide="volume-2" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Simulate Flash Scenario -->
+        <button id="open-simulate-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-700 text-xs font-medium text-zinc-200 hover:bg-zinc-800 hover:border-zinc-500 transition-colors">
+          <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-400 fill-amber-400"></i>
+          <span class="hidden sm:inline">Simulate Event</span>
+          <span class="sm:hidden">Sim</span>
+        </button>
+
+        <!-- Force Ingest Button -->
+        <button id="force-poll-btn" class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-obsidian font-bold text-xs transition-all shadow-md active:scale-95">
+          <i id="force-poll-icon" data-lucide="rotate-cw" class="w-3.5 h-3.5 text-obsidian"></i>
+          <span>Instant Ingest</span>
+        </button>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= 3. MAIN DASHBOARD CONTENT ================= -->
+  <main class="max-w-7xl mx-auto w-full px-4 lg:px-8 py-5 space-y-5 flex-1">
+    
+    <!-- STATS ROW WITH REALTIME DYNAMIC RECALCULATION -->
+    <section class="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+      
+      <!-- Card 1: Sentiment Dominance -->
+      <div class="glass-card p-4 rounded-xl flex flex-col justify-between">
+        <div class="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1">
+          <span>GOLD SENTIMENT BIAS</span>
+          <i data-lucide="compass" class="w-4 h-4 text-gold-accent"></i>
+        </div>
+        <div class="flex items-baseline gap-2 my-1">
+          <span id="stat-bullish-pct" class="text-2xl font-bold font-mono text-emerald-400">50.0%</span>
+          <span class="text-xs text-zinc-400">Bullish Ratio</span>
+        </div>
+        <div class="w-full bg-zinc-800 h-2 rounded-full overflow-hidden flex">
+          <div id="sentiment-bar-bullish" class="bg-emerald-500 h-full transition-all duration-300" style="width: 50%"></div>
+          <div id="sentiment-bar-bearish" class="bg-rose-500 h-full transition-all duration-300" style="width: 50%"></div>
+        </div>
+        <div class="flex justify-between text-[10px] font-mono text-zinc-400 mt-1.5">
+          <span id="stat-bullish-count">0 Bullish</span>
+          <span id="stat-bearish-count">0 Bearish</span>
+        </div>
+      </div>
+
+      <!-- Card 2: Critical Volatility Catalysts -->
+      <div class="glass-card p-4 rounded-xl flex flex-col justify-between">
+        <div class="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1">
+          <span>CRITICAL & HIGH ALERTS</span>
+          <i data-lucide="flame" class="w-4 h-4 text-rose-400"></i>
+        </div>
+        <div class="flex items-baseline gap-2 my-1">
+          <span id="stat-critical-count" class="text-2xl font-bold font-mono text-rose-400">0</span>
+          <span class="text-xs text-zinc-400">Actionable Catalysts</span>
+        </div>
+        <div class="text-[11px] text-zinc-400 font-mono flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+          <span>Telegram + WebSocket Push</span>
+        </div>
+      </div>
+
+      <!-- Card 3: Ingestion Stream Throughput -->
+      <div class="glass-card p-4 rounded-xl flex flex-col justify-between">
+        <div class="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1">
+          <span>PIPELINE CONCURRENCY</span>
+          <i data-lucide="zap" class="w-4 h-4 text-cyan-400"></i>
+        </div>
+        <div class="flex items-baseline gap-2 my-1">
+          <span id="stat-total-processed" class="text-2xl font-bold font-mono text-cyan-400">0</span>
+          <span class="text-xs text-zinc-400">Events Parsed</span>
+        </div>
+        <div class="text-[11px] text-zinc-400 font-mono truncate">
+          BBC, AJ, Reuters, NYT, Fed, ForexFactory
+        </div>
+      </div>
+
+      <!-- Card 4: Quantitative Transmission Model -->
+      <div class="glass-card p-4 rounded-xl flex flex-col justify-between">
+        <div class="flex items-center justify-between text-xs font-mono text-zinc-400 mb-1">
+          <span>PARSING ENGINE</span>
+          <i data-lucide="cpu" class="w-4 h-4 text-purple-400"></i>
+        </div>
+        <div class="flex items-baseline gap-2 my-1">
+          <span id="engine-model-badge" class="text-xl font-bold font-mono text-purple-300">Llama-3.3-70B</span>
+        </div>
+        <div class="text-[11px] text-zinc-400 font-mono flex items-center justify-between">
+          <span>Parallel Semaphore(8)</span>
+          <span class="text-emerald-400 font-bold">&lt;1.5s Cycle</span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ================= 4. MACRO CORRELATION MATRIX WIDGET ================= -->
+    <section class="glass-card p-5 rounded-xl">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3.5 border-b border-zinc-800/80 pb-3">
+        <div class="flex items-center gap-2">
+          <div class="p-1.5 rounded bg-zinc-800 text-gold-accent">
+            <i data-lucide="network" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h2 class="text-xs font-bold tracking-wider text-zinc-100 uppercase font-mono">Macro Asset Transmission Matrix</h2>
+            <p class="text-[11px] text-zinc-400">Mechanical cross-asset channels directly dictating XAU/USD capital flows</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
+            Real-time live updates
+          </span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3" id="correlation-matrix-grid">
+        
+        <!-- DXY -->
+        <div class="p-3 rounded-lg bg-zinc-900/90 border border-zinc-800 flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-mono text-xs font-bold text-zinc-200">DXY (US Dollar)</span>
+            <span class="text-[10px] font-mono px-1 py-0.5 rounded bg-zinc-800 text-zinc-400">-0.82 Inv</span>
+          </div>
+          <div class="my-1">
+            <span id="matrix-dxy-badge" class="px-2 py-0.5 text-xs font-mono font-semibold rounded bg-zinc-800 text-zinc-300">NEUTRAL</span>
+          </div>
+          <p id="matrix-dxy-logic" class="text-[10px] text-zinc-400 leading-tight mt-1">
+            Gold is priced in USD; dollar purchasing power debasement stimulates bullion demand.
+          </p>
+        </div>
+
+        <!-- US10Y TIPS -->
+        <div class="p-3 rounded-lg bg-zinc-900/90 border border-zinc-800 flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-mono text-xs font-bold text-zinc-200">US10Y TIPS (Real)</span>
+            <span class="text-[10px] font-mono px-1 py-0.5 rounded bg-zinc-800 text-zinc-400">-0.88 Core</span>
+          </div>
+          <div class="my-1">
+            <span id="matrix-tips-badge" class="px-2 py-0.5 text-xs font-mono font-semibold rounded bg-zinc-800 text-zinc-300">NEUTRAL</span>
+          </div>
+          <p id="matrix-tips-logic" class="text-[10px] text-zinc-400 leading-tight mt-1">
+            Real yield = Nominal 10Y - Inflation expectations. Benchmark opportunity cost driver.
+          </p>
+        </div>
+
+        <!-- WTI Crude Oil -->
+        <div class="p-3 rounded-lg bg-zinc-900/90 border border-zinc-800 flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-mono text-xs font-bold text-zinc-200">WTI Crude Oil</span>
+            <span class="text-[10px] font-mono px-1 py-0.5 rounded bg-zinc-800 text-zinc-400">+0.65 Stg</span>
+          </div>
+          <div class="my-1">
+            <span id="matrix-oil-badge" class="px-2 py-0.5 text-xs font-mono font-semibold rounded bg-zinc-800 text-zinc-300">NEUTRAL</span>
+          </div>
+          <p id="matrix-oil-logic" class="text-[10px] text-zinc-400 leading-tight mt-1">
+            Energy disruption accelerates CPI expectations and triggers safe haven hedging.
+          </p>
+        </div>
+
+        <!-- Silver (XAG) -->
+        <div class="p-3 rounded-lg bg-zinc-900/90 border border-zinc-800 flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-mono text-xs font-bold text-zinc-200">Silver (XAG)</span>
+            <span class="text-[10px] font-mono px-1 py-0.5 rounded bg-zinc-800 text-zinc-400">+0.92 Beta</span>
+          </div>
+          <div class="my-1">
+            <span id="matrix-xag-badge" class="px-2 py-0.5 text-xs font-mono font-semibold rounded bg-zinc-800 text-zinc-300">NEUTRAL</span>
+          </div>
+          <p id="matrix-xag-logic" class="text-[10px] text-zinc-400 leading-tight mt-1">
+            High-beta precious metals sister asset (~1.5x-2.0x volatility during institutional flows).
+          </p>
+        </div>
+
+        <!-- VIX -->
+        <div class="p-3 rounded-lg bg-zinc-900/90 border border-zinc-800 flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="font-mono text-xs font-bold text-zinc-200">VIX (Fear Index)</span>
+            <span class="text-[10px] font-mono px-1 py-0.5 rounded bg-zinc-800 text-zinc-400">+0.55 Risk</span>
+          </div>
+          <div class="my-1">
+            <span id="matrix-vix-badge" class="px-2 py-0.5 text-xs font-mono font-semibold rounded bg-zinc-800 text-zinc-300">NEUTRAL</span>
+          </div>
+          <p id="matrix-vix-logic" class="text-[10px] text-zinc-400 leading-tight mt-1">
+            Equity market turbulence and tail-risk panic trigger non-correlated gold allocations.
+          </p>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ================= 5. REAL-TIME FILTER TOOLBAR ================= -->
+    <section class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+      
+      <!-- Search Input with Instant Zero-Lag Filtering -->
+      <div class="relative flex-1 max-w-md">
+        <i data-lucide="search" class="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+        <input 
+          id="search-input" 
+          type="text" 
+          placeholder="Filter instant headlines, sources, transmission keywords..." 
+          class="w-full pl-9 pr-4 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-gold-accent transition-colors"
+        >
+      </div>
+
+      <!-- Quick Filter Pills -->
+      <div class="flex flex-wrap items-center gap-1.5 text-xs font-mono">
+        <button class="filter-btn active px-3 py-1.5 rounded-lg bg-gold-accent text-obsidian font-bold transition-all shadow-sm" data-filter="all">ALL</button>
+        <button class="filter-btn px-3 py-1.5 rounded-lg bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200 transition-colors" data-filter="critical">CRITICAL / HIGH</button>
+        <button class="filter-btn px-3 py-1.5 rounded-lg bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200 transition-colors" data-filter="bullish">BULLISH ONLY</button>
+        <button class="filter-btn px-3 py-1.5 rounded-lg bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200 transition-colors" data-filter="bearish">BEARISH ONLY</button>
+        <button class="filter-btn px-3 py-1.5 rounded-lg bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200 transition-colors" data-filter="calendar">ECONOMIC CALENDAR</button>
+        <button class="filter-btn px-3 py-1.5 rounded-lg bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200 transition-colors" data-filter="geopolitical">GEOPOLITICS</button>
+      </div>
+
+    </section>
+
+    <!-- ================= 6. LIVE STREAMING EVENT FEED ================= -->
+    <section class="space-y-3.5">
+      <div class="flex items-center justify-between text-xs text-zinc-400 font-mono">
+        <div class="flex items-center gap-2">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+          </span>
+          <span class="font-bold text-zinc-200">REAL-TIME QUANT INTELLIGENCE STREAM (<span id="event-display-count">0</span>)</span>
+        </div>
+        <span class="text-zinc-500 text-[11px]">Instant Push Updates (WebSockets / SSE)</span>
+      </div>
+
+      <!-- Events Container -->
+      <div id="events-container" class="space-y-3.5">
+        <div id="loading-skeleton" class="glass-card p-8 rounded-xl text-center py-12 text-zinc-500">
+          <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-3 text-gold-accent"></i>
+          <p class="font-mono text-sm">Synchronizing real-time SQLite stream...</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ================= 7. SIMULATION MODAL ================= -->
+  <div id="simulate-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="glass-card max-w-lg w-full p-6 rounded-2xl border border-zinc-700 glow-gold relative space-y-4">
+      
+      <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <div class="flex items-center gap-2">
+          <i data-lucide="zap" class="w-5 h-5 text-amber-400 fill-amber-400"></i>
+          <h3 class="font-semibold text-base text-zinc-100">Simulate Breaking Geopolitical Flash</h3>
+        </div>
+        <button id="close-simulate-btn" class="p-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-zinc-400">
+        Inject an instantaneous shock scenario to observe the quantitative transmission engine, momentum calculator, and real-time dashboard broadcast.
+      </p>
+
+      <!-- Preset Scenarios -->
+      <div class="space-y-1.5">
+        <label class="text-xs font-mono text-zinc-300">Select Instant Scenario:</label>
+        <div class="grid grid-cols-1 gap-2">
+          <button class="preset-btn text-left p-2.5 rounded-lg bg-zinc-900/90 border border-zinc-800 hover:border-gold-accent text-xs text-zinc-300 transition-colors"
+            data-title="Strait of Hormuz: Military Strike Disables Commercial Tanker, Crude Jumps +6.2%"
+            data-source="Reuters FastWire Geopolitics"
+            data-summary="Iranian-backed militia launched three drone and cruise missile strikes against a commercial crude tanker transiting the Strait of Hormuz, shutting shipping lanes.">
+            🚨 <span class="font-bold text-rose-400">[War / Energy]</span> Strait of Hormuz Tanker Strike (+6% Oil Spike)
+          </button>
+          
+          <button class="preset-btn text-left p-2.5 rounded-lg bg-zinc-900/90 border border-zinc-800 hover:border-gold-accent text-xs text-zinc-300 transition-colors"
+            data-title="US Core CPI Drops Below Forecast at 0.1% MoM — US 10Y Real Yields Plunge 14bps"
+            data-source="Bureau of Labor Statistics / ForexFactory"
+            data-summary="Headline and Core CPI for August cooled significantly below street forecasts, pulling forward expectations of aggressive 50bps Fed easing.">
+            📉 <span class="font-bold text-emerald-400">[Dovish Macro]</span> US Core CPI Drops to 0.1% (Real Yields Plunge)
+          </button>
+
+          <button class="preset-btn text-left p-2.5 rounded-lg bg-zinc-900/90 border border-zinc-800 hover:border-gold-accent text-xs text-zinc-300 transition-colors"
+            data-title="Fed Chair Powell: Emergency Inter-Meeting 50bps Cut Approved Due to Liquidity Pressures"
+            data-source="Federal Reserve Press Release"
+            data-summary="Federal Open Market Committee announces surprise emergency 50 basis point reduction in target federal funds rate to 4.75%-5.00%.">
+            ⚡ <span class="font-bold text-gold-accent">[FOMC Rate Cut]</span> Powell Announces Emergency 50bps Cut
+          </button>
+
+          <button class="preset-btn text-left p-2.5 rounded-lg bg-zinc-900/90 border border-zinc-800 hover:border-gold-accent text-xs text-zinc-300 transition-colors"
+            data-title="US Non-Farm Payrolls Surge +320,000, Wage Growth Accelerates to 4.5% YoY — Yields Surge"
+            data-source="Department of Labor"
+            data-summary="Crushing jobs report shatters economic slowdown narrative; traders aggressively price out near-term rate cuts as 10-year Treasury yields surge 18 bps.">
+            🔥 <span class="font-bold text-rose-400">[Hawkish Macro]</span> Blockbuster NFP +320k (Yields Surge)
+          </button>
+        </div>
+      </div>
+
+      <!-- Custom Form -->
+      <form id="simulate-form" class="space-y-3 pt-2 border-t border-zinc-800">
+        <div>
+          <label class="block text-xs font-mono text-zinc-400 mb-1">Custom Headline Title:</label>
+          <input id="sim-title" type="text" required class="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-100 focus:outline-none focus:border-gold-accent" placeholder="e.g. Taiwan Strait Naval Exercises Expand...">
+        </div>
+        <div>
+          <label class="block text-xs font-mono text-zinc-400 mb-1">Summary / Context:</label>
+          <textarea id="sim-summary" rows="2" class="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-100 focus:outline-none focus:border-gold-accent" placeholder="Additional briefing context for economic transmission..."></textarea>
+        </div>
+        <div class="flex justify-end gap-2 pt-1">
+          <button type="button" id="cancel-simulate-btn" class="px-4 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 hover:bg-zinc-800">Cancel</button>
+          <button type="submit" id="submit-simulate-btn" class="px-5 py-2 rounded-lg bg-gold-accent hover:bg-yellow-500 text-obsidian font-bold text-xs flex items-center gap-1.5 transition-all">
+            <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+            <span>Inject Instant Shock</span>
+          </button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+
+  <!-- ================= 8. FOOTER ================= -->
+  <footer class="border-t border-surfaceBorder bg-obsidian py-4 px-4 lg:px-8 mt-auto text-xs text-zinc-500 font-mono">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-gold-accent"></span>
+        <span>AUREUS // XAU-USD EVENT-DRIVEN QUANT PLATFORM</span>
+      </div>
+      <div>
+        <span>FastAPI • WebSockets + SSE • Parallel Ingestion • SQLite WAL</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ================= 9. SCRIPT ENGINE ================= -->
+  <script>
+    // State Management
+    let allEvents = [];
+    let activeFilter = 'all';
+    let searchQuery = '';
+    let isSoundEnabled = localStorage.getItem('aureus_sound') !== 'false';
+    let ws = null;
+    let eventSource = null;
+    let countdownSeconds = 25;
+    let pollIntervalVal = 25;
+    let lastPingTime = Date.now();
+
+    // Web Audio Synthesizer
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function playAlertChime(severity) {
+      if (!isSoundEnabled) return;
+      try {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        const now = audioCtx.currentTime;
+
+        if (severity === 'CRITICAL') {
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(880, now);
+          osc.frequency.setValueAtTime(1320, now + 0.1);
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+          osc.start(now);
+          osc.stop(now + 0.45);
+        } else {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(659.25, now);
+          osc.frequency.setValueAtTime(880, now + 0.12);
+          gain.gain.setValueAtTime(0.15, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+          osc.start(now);
+          osc.stop(now + 0.35);
+        }
+      } catch (e) {}
+    }
+
+    function renderIcons() {
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function timeAgo(dateString) {
+      try {
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString;
+        const seconds = Math.floor((new Date() - date) / 1000);
+        if (seconds < 20) return 'Just now';
+        if (seconds < 60) return `${seconds}s ago`;
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        return `${Math.floor(hours / 24)}d ago`;
+      } catch (e) {
+        return dateString;
+      }
+    }
+
+    // World Session Clocks Engine
+    function updateClocks() {
+      const now = new Date();
+      const utcHours = now.getUTCHours();
+      const utcMins = now.getUTCMinutes();
+      const utcSecs = now.getUTCSeconds();
+
+      const pad = (n) => String(n).padStart(2, '0');
+      document.getElementById('clock-utc').textContent = `${pad(utcHours)}:${pad(utcMins)}:${pad(utcSecs)}`;
+
+      // London (UTC+0 / UTC+1)
+      const ldnHours = (utcHours + 1) % 24;
+      document.getElementById('clock-london').textContent = `${pad(ldnHours)}:${pad(utcMins)}`;
+      const isLdnActive = utcHours >= 8 && utcHours < 16;
+      document.getElementById('badge-london').className = `w-1.5 h-1.5 rounded-full ${isLdnActive ? 'bg-emerald-400 animate-ping' : 'bg-zinc-600'}`;
+
+      // New York (UTC-4 / UTC-5)
+      const nyHours = (utcHours + 20) % 24;
+      document.getElementById('clock-ny').textContent = `${pad(nyHours)}:${pad(utcMins)}`;
+      const isNyActive = utcHours >= 13 && utcHours < 21;
+      document.getElementById('badge-ny').className = `w-1.5 h-1.5 rounded-full ${isNyActive ? 'bg-emerald-400 animate-ping' : 'bg-zinc-600'}`;
+
+      // Tokyo (UTC+9)
+      const tokyoHours = (utcHours + 9) % 24;
+      document.getElementById('clock-tokyo').textContent = `${pad(tokyoHours)}:${pad(utcMins)}`;
+      const isTokyoActive = utcHours >= 0 && utcHours < 9;
+      document.getElementById('badge-tokyo').className = `w-1.5 h-1.5 rounded-full ${isTokyoActive ? 'bg-emerald-400' : 'bg-zinc-600'}`;
+
+      // Peak Gold Volatility Overlap: London & New York (13:00 to 16:30 UTC)
+      const isOverlap = isLdnActive && isNyActive;
+      const overlapElem = document.getElementById('overlap-indicator');
+      if (isOverlap) {
+        overlapElem.classList.remove('hidden');
+      } else {
+        overlapElem.classList.add('hidden');
+      }
+    }
+    setInterval(updateClocks, 1000);
+    updateClocks();
+
+    // Ticking Countdown Engine
+    function runCountdown() {
+      countdownSeconds--;
+      if (countdownSeconds <= 0) {
+        countdownSeconds = pollIntervalVal;
+        document.getElementById('sync-countdown-text').textContent = 'SYNCING...';
+      } else {
+        document.getElementById('sync-countdown-text').textContent = `${countdownSeconds}s`;
+      }
+    }
+    setInterval(runCountdown, 1000);
+
+    // Live Spot Gold Price Ticker Engine
+    function updatePriceTicker(data) {
+      if (!data) return;
+      const priceElem = document.getElementById('ticker-price');
+      const deltaPill = document.getElementById('ticker-delta-pill');
+      const bidElem = document.getElementById('ticker-bid');
+      const askElem = document.getElementById('ticker-ask');
+      const spreadElem = document.getElementById('ticker-spread');
+      const rangeElem = document.getElementById('ticker-range');
+
+      const currentPrice = parseFloat(priceElem.textContent.replace('$', '').trim());
+      const newPrice = data.price;
+
+      priceElem.textContent = `$${newPrice.toFixed(2)}`;
+      bidElem.textContent = data.bid.toFixed(2);
+      askElem.textContent = data.ask.toFixed(2);
+      spreadElem.textContent = data.spread.toFixed(2);
+      rangeElem.textContent = `${data.day_low.toFixed(2)} - ${data.day_high.toFixed(2)}`;
+
+      if (data.delta > 0) {
+        priceElem.className = 'text-lg font-mono font-extrabold tracking-tight text-emerald-400 px-1 rounded animate-flash-green';
+        deltaPill.className = 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold';
+        deltaPill.textContent = `▲ +${data.delta.toFixed(2)}`;
+      } else if (data.delta < 0) {
+        priceElem.className = 'text-lg font-mono font-extrabold tracking-tight text-rose-400 px-1 rounded animate-flash-red';
+        deltaPill.className = 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold';
+        deltaPill.textContent = `▼ ${data.delta.toFixed(2)}`;
+      }
+    }
+
+    // Dynamic Instant Stats Recalculation
+    function computeDynamicStats() {
+      const total = allEvents.length;
+      if (total === 0) return;
+
+      const bullish = allEvents.filter(e => (e.gold_bias || '').includes('BULLISH')).length;
+      const bearish = allEvents.filter(e => (e.gold_bias || '').includes('BEARISH')).length;
+      const critical = allEvents.filter(e => e.severity === 'CRITICAL' || e.severity === 'HIGH').length;
+      const pct = Math.round((bullish / total) * 100);
+
+      document.getElementById('stat-bullish-pct').textContent = `${pct}%`;
+      document.getElementById('sentiment-bar-bullish').style.width = `${pct}%`;
+      document.getElementById('sentiment-bar-bearish').style.width = `${100 - pct}%`;
+      document.getElementById('stat-bullish-count').textContent = `${bullish} Bullish`;
+      document.getElementById('stat-bearish-count').textContent = `${bearish} Bearish`;
+      document.getElementById('stat-critical-count').textContent = critical;
+      document.getElementById('stat-total-processed').textContent = total;
+    }
+
+    // Badge Renderers
+    function getSeverityBadge(severity) {
+      const map = {
+        'CRITICAL': '<span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/40 text-[10px] font-mono font-bold tracking-wider animate-pulse flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>CRITICAL</span>',
+        'HIGH': '<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 text-[10px] font-mono font-bold tracking-wider flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>HIGH IMPACT</span>',
+        'MEDIUM': '<span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-500/30 text-[10px] font-mono font-medium">MEDIUM</span>',
+        'LOW': '<span class="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 text-[10px] font-mono font-medium">LOW</span>',
+      };
+      return map[severity] || map['LOW'];
+    }
+
+    function getBiasBadge(bias) {
+      if (bias === 'STRONG_BULLISH') return '<span class="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-xs font-mono font-bold flex items-center gap-1">▲▲ STRONG BULLISH</span>';
+      if (bias === 'BULLISH') return '<span class="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-semibold flex items-center gap-1">▲ BULLISH</span>';
+      if (bias === 'STRONG_BEARISH') return '<span class="px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40 text-xs font-mono font-bold flex items-center gap-1">▼▼ STRONG BEARISH</span>';
+      if (bias === 'BEARISH') return '<span class="px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/30 text-xs font-mono font-semibold flex items-center gap-1">▼ BEARISH</span>';
+      return '<span class="px-2.5 py-1 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 text-xs font-mono font-medium flex items-center gap-1">● NEUTRAL</span>';
+    }
+
+    function getMomentumMeter(momentum) {
+      let width = '25%';
+      let color = 'bg-zinc-500';
+      if (momentum && momentum.includes('15-40+')) {
+        width = '95%';
+        color = 'bg-gradient-to-r from-amber-500 to-rose-500';
+      } else if (momentum && momentum.includes('5-15')) {
+        width = '55%';
+        color = 'bg-gradient-to-r from-sky-500 to-amber-500';
+      }
+      return `
+        <div class="flex items-center gap-2">
+          <div class="w-16 bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+            <div class="${color} h-full rounded-full" style="width: ${width}"></div>
+          </div>
+          <span class="text-[11px] font-mono text-zinc-300">${escapeHtml(momentum || 'Muted')}</span>
+        </div>
+      `;
+    }
+
+    function createEventCardHtml(ev) {
+      const isCritical = ev.severity === 'CRITICAL';
+      const cardBorderClass = isCritical ? 'border-rose-500/50 glow-critical ring-1 ring-rose-500/30' : 'border-zinc-800/90';
+      const corr = ev.correlated_assets_impact || {};
+
+      return `
+        <article class="glass-card p-5 rounded-xl border ${cardBorderClass} animate-slide-in transition-all relative overflow-hidden group" id="event-${ev.id}">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-mono font-medium px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">
+                ${escapeHtml(ev.source)}
+              </span>
+              <span class="text-xs text-zinc-500 font-mono" title="${escapeHtml(ev.published_at)}">
+                ${timeAgo(ev.published_at || ev.created_at)}
+              </span>
+            </div>
+            
+            <div class="flex items-center gap-2">
+              ${getSeverityBadge(ev.severity)}
+              ${getBiasBadge(ev.gold_bias)}
+            </div>
+          </div>
+
+          <h3 class="text-base font-semibold text-zinc-100 group-hover:text-amber-300 transition-colors mb-2 leading-snug">
+            <a href="${escapeHtml(ev.link)}" target="_blank" rel="noopener noreferrer" class="hover:underline flex items-start justify-between gap-2">
+              <span>${escapeHtml(ev.title)}</span>
+              <i data-lucide="external-link" class="w-4 h-4 text-zinc-500 flex-shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity"></i>
+            </a>
+          </h3>
+
+          ${ev.summary ? `<p class="text-xs text-zinc-400 mb-3 leading-relaxed line-clamp-2">${escapeHtml(ev.summary)}</p>` : ''}
+
+          <div class="p-3 rounded-lg bg-zinc-900/90 border border-zinc-800/90 mb-3 relative">
+            <div class="flex items-center gap-1.5 text-[11px] font-mono text-gold-accent font-semibold mb-1">
+              <i data-lucide="target" class="w-3.5 h-3.5"></i>
+              <span>TRANSMISSION MECHANISM</span>
+            </div>
+            <p class="text-xs text-zinc-200 leading-relaxed font-sans italic">
+              "${escapeHtml(ev.transmission_mechanism)}"
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-800/70 text-xs">
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] text-zinc-400 font-mono">EST. MOMENTUM:</span>
+              ${getMomentumMeter(ev.potential_momentum)}
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button onclick="copyBriefing('${ev.id}')" class="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-[11px] font-mono flex items-center gap-1 transition-colors">
+                <i data-lucide="copy" class="w-3 h-3"></i>
+                <span class="copy-label-${ev.id}">Copy</span>
+              </button>
+
+              <button onclick="toggleDrawer('${ev.id}')" class="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-gold-accent text-[11px] font-mono flex items-center gap-1 transition-colors">
+                <i data-lucide="layers" class="w-3 h-3"></i>
+                <span>Cross-Asset</span>
+                <i id="drawer-arrow-${ev.id}" data-lucide="chevron-down" class="w-3 h-3 transition-transform"></i>
+              </button>
+            </div>
+          </div>
+
+          <div id="drawer-${ev.id}" class="hidden pt-3 mt-3 border-t border-zinc-800/60 grid grid-cols-1 sm:grid-cols-5 gap-2 text-xs font-mono">
+            <div class="p-2 rounded bg-zinc-950/80 border border-zinc-800">
+              <span class="text-[10px] text-zinc-400 block">DXY</span>
+              <span class="text-xs font-bold ${getAssetColor(corr.DXY?.direction)}">${corr.DXY?.direction || 'NEUTRAL'}</span>
+              <p class="text-[10px] text-zinc-400 mt-1">${escapeHtml(corr.DXY?.logic || '')}</p>
+            </div>
+            <div class="p-2 rounded bg-zinc-950/80 border border-zinc-800">
+              <span class="text-[10px] text-zinc-400 block">US10Y TIPS</span>
+              <span class="text-xs font-bold ${getAssetColor(corr.US10Y_TIPS?.direction)}">${corr.US10Y_TIPS?.direction || 'NEUTRAL'}</span>
+              <p class="text-[10px] text-zinc-400 mt-1">${escapeHtml(corr.US10Y_TIPS?.logic || '')}</p>
+            </div>
+            <div class="p-2 rounded bg-zinc-950/80 border border-zinc-800">
+              <span class="text-[10px] text-zinc-400 block">WTI CRUDE</span>
+              <span class="text-xs font-bold ${getAssetColor(corr.WTI_Crude?.direction)}">${corr.WTI_Crude?.direction || 'NEUTRAL'}</span>
+              <p class="text-[10px] text-zinc-400 mt-1">${escapeHtml(corr.WTI_Crude?.logic || '')}</p>
+            </div>
+            <div class="p-2 rounded bg-zinc-950/80 border border-zinc-800">
+              <span class="text-[10px] text-zinc-400 block">SILVER (XAG)</span>
+              <span class="text-xs font-bold ${getAssetColor(corr.Silver_XAG?.direction)}">${corr.Silver_XAG?.direction || 'NEUTRAL'}</span>
+              <p class="text-[10px] text-zinc-400 mt-1">${escapeHtml(corr.Silver_XAG?.logic || '')}</p>
+            </div>
+            <div class="p-2 rounded bg-zinc-950/80 border border-zinc-800">
+              <span class="text-[10px] text-zinc-400 block">VIX</span>
+              <span class="text-xs font-bold ${getAssetColor(corr.VIX?.direction)}">${corr.VIX?.direction || 'NEUTRAL'}</span>
+              <p class="text-[10px] text-zinc-400 mt-1">${escapeHtml(corr.VIX?.logic || '')}</p>
+            </div>
+          </div>
+        </article>
+      `;
+    }
+
+    function getAssetColor(direction) {
+      if (direction === 'BULLISH' || direction === 'STRONG_BULLISH') return 'text-emerald-400';
+      if (direction === 'BEARISH' || direction === 'STRONG_BEARISH') return 'text-rose-400';
+      return 'text-zinc-400';
+    }
+
+    function toggleDrawer(id) {
+      const drawer = document.getElementById(`drawer-${id}`);
+      const arrow = document.getElementById(`drawer-arrow-${id}`);
+      if (drawer) {
+        const isHidden = drawer.classList.contains('hidden');
+        drawer.classList.toggle('hidden');
+        arrow.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+      }
+    }
+
+    function copyBriefing(id) {
+      const ev = allEvents.find(e => e.id === id);
+      if (!ev) return;
+      const text = `🚨 [${ev.severity}] XAU/USD INTEL: ${ev.gold_bias}\nHeadline: ${ev.title}\nMechanism: ${ev.transmission_mechanism}\nMomentum: ${ev.potential_momentum}\nSource: ${ev.source} (${ev.link})`;
+      navigator.clipboard.writeText(text).then(() => {
+        const labels = document.querySelectorAll(`.copy-label-${id}`);
+        labels.forEach(l => l.textContent = 'Copied!');
+        setTimeout(() => { labels.forEach(l => l.textContent = 'Copy'); }, 2000);
+      });
+    }
+
+    function updateCorrelationMatrix(latestEvent) {
+      if (!latestEvent || !latestEvent.correlated_assets_impact) return;
+      const c = latestEvent.correlated_assets_impact;
+
+      function setBadge(elemId, logicId, assetData) {
+        const badge = document.getElementById(elemId);
+        const logic = document.getElementById(logicId);
+        if (!badge || !assetData) return;
+        const dir = assetData.direction || 'NEUTRAL';
+        badge.textContent = dir;
+        badge.className = `px-2 py-0.5 text-xs font-mono font-semibold rounded ${
+          dir === 'BULLISH' || dir === 'STRONG_BULLISH' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' :
+          dir === 'BEARISH' || dir === 'STRONG_BEARISH' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40' :
+          'bg-zinc-800 text-zinc-300 border border-zinc-700'
+        }`;
+        if (logic && assetData.logic) logic.textContent = assetData.logic;
+      }
+
+      setBadge('matrix-dxy-badge', 'matrix-dxy-logic', c.DXY);
+      setBadge('matrix-tips-badge', 'matrix-tips-logic', c.US10Y_TIPS);
+      setBadge('matrix-oil-badge', 'matrix-oil-logic', c.WTI_Crude);
+      setBadge('matrix-xag-badge', 'matrix-xag-logic', c.Silver_XAG);
+      setBadge('matrix-vix-badge', 'matrix-vix-logic', c.VIX);
+    }
+
+    function filterEvents() {
+      return allEvents.filter(ev => {
+        if (searchQuery) {
+          const q = searchQuery.toLowerCase();
+          const match = (ev.title || '').toLowerCase().includes(q) ||
+                        (ev.summary || '').toLowerCase().includes(q) ||
+                        (ev.transmission_mechanism || '').toLowerCase().includes(q) ||
+                        (ev.source || '').toLowerCase().includes(q);
+          if (!match) return false;
+        }
+
+        if (activeFilter === 'critical') return ev.severity === 'CRITICAL' || ev.severity === 'HIGH';
+        if (activeFilter === 'bullish') return (ev.gold_bias || '').includes('BULLISH');
+        if (activeFilter === 'bearish') return (ev.gold_bias || '').includes('BEARISH');
+        if (activeFilter === 'calendar') return (ev.source || '').toLowerCase().includes('forexfactory') || (ev.title || '').toLowerCase().includes('economic release');
+        if (activeFilter === 'geopolitical') {
+          const text = ((ev.title || '') + ' ' + (ev.summary || '')).toLowerCase();
+          return ['war', 'missile', 'strike', 'iran', 'taiwan', 'russia', 'hormuz', 'military'].some(k => text.includes(k));
+        }
+
+        return true;
+      });
+    }
+
+    function renderFeed() {
+      const container = document.getElementById('events-container');
+      const filtered = filterEvents();
+      document.getElementById('event-display-count').textContent = filtered.length;
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="glass-card p-8 rounded-xl text-center py-12 text-zinc-500">
+            <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-zinc-600"></i>
+            <p class="font-mono text-sm">No intelligence events match the filter query.</p>
+          </div>
+        `;
+      } else {
+        container.innerHTML = filtered.map(ev => createEventCardHtml(ev)).join('');
+      }
+      renderIcons();
+    }
+
+    // Handle Incoming Event with Zero Delay
+    function handleIncomingEvent(event) {
+      if (!allEvents.some(item => item.id === event.id)) {
+        allEvents.unshift(event);
+        if (allEvents.length > 80) allEvents.pop();
+
+        if (event.severity === 'CRITICAL' || event.severity === 'HIGH') {
+          playAlertChime(event.severity);
+        }
+
+        renderFeed();
+        updateCorrelationMatrix(event);
+        computeDynamicStats();
+      }
+    }
+
+    // DUAL STREAM: WebSockets + SSE Fallback
+    function initRealtimeStream() {
+      const protocolBadge = document.getElementById('protocol-badge');
+      const latencyText = document.getElementById('conn-latency-text');
+      const isHttps = location.protocol === 'https:';
+      const wsUrl = `${isHttps ? 'wss:' : 'ws:'}//${location.host}/ws`;
+
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          protocolBadge.textContent = 'WEBSOCKET ACTIVE';
+          protocolBadge.className = 'px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold';
+          latencyText.textContent = '<5ms stream';
+          // Ping heartbeat
+          setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              lastPingTime = Date.now();
+              ws.send('ping');
+            }
+          }, 10000);
+        };
+
+        ws.onmessage = (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'pong') {
+              const pingMs = Date.now() - lastPingTime;
+              latencyText.textContent = `${pingMs}ms latency`;
+            } else if (msg.type === 'price_tick') {
+              updatePriceTicker(msg.data);
+            } else if (msg.type === 'new_event') {
+              handleIncomingEvent(msg.data);
+            }
+          } catch (err) {}
+        };
+
+        ws.onerror = () => {
+          // Fallback to SSE
+          initSSEFallback();
+        };
+
+        ws.onclose = () => {
+          setTimeout(initRealtimeStream, 2500);
+        };
+
+      } catch (e) {
+        initSSEFallback();
+      }
+    }
+
+    function initSSEFallback() {
+      if (eventSource) return;
+      const protocolBadge = document.getElementById('protocol-badge');
+      const latencyText = document.getElementById('conn-latency-text');
+
+      eventSource = new EventSource('/api/events/stream');
+      protocolBadge.textContent = 'SSE ACTIVE';
+      protocolBadge.className = 'px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-400 border border-sky-500/40 text-[10px] font-bold';
+
+      eventSource.addEventListener('price_tick', (e) => {
+        try { updatePriceTicker(JSON.parse(e.data)); } catch (err) {}
+      });
+
+      eventSource.addEventListener('new_event', (e) => {
+        try { handleIncomingEvent(JSON.parse(e.data)); } catch (err) {}
+      });
+    }
+
+    async function fetchInitialEvents() {
+      try {
+        const res = await fetch('/api/events?limit=50');
+        if (res.ok) {
+          const data = await res.json();
+          allEvents = data.events || [];
+          renderFeed();
+          if (allEvents.length > 0) updateCorrelationMatrix(allEvents[0]);
+          computeDynamicStats();
+        }
+      } catch (e) {}
+    }
+
+    // Interactive Controls
+    function setupInteractions() {
+      // Sound Toggle
+      const soundBtn = document.getElementById('sound-toggle-btn');
+      const soundIcon = document.getElementById('sound-icon');
+      function updateSoundUi() {
+        if (isSoundEnabled) {
+          soundIcon.setAttribute('data-lucide', 'volume-2');
+          soundBtn.classList.add('text-gold-accent');
+        } else {
+          soundIcon.setAttribute('data-lucide', 'volume-x');
+          soundBtn.classList.remove('text-gold-accent');
+        }
+        renderIcons();
+      }
+      updateSoundUi();
+
+      soundBtn.addEventListener('click', () => {
+        isSoundEnabled = !isSoundEnabled;
+        localStorage.setItem('aureus_sound', isSoundEnabled);
+        updateSoundUi();
+        if (isSoundEnabled) playAlertChime('LOW');
+      });
+
+      // Search Box (instant keyup)
+      document.getElementById('search-input').addEventListener('input', (e) => {
+        searchQuery = e.target.value;
+        renderFeed();
+      });
+
+      // Filter Buttons
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.filter-btn').forEach(b => {
+            b.classList.remove('bg-gold-accent', 'text-obsidian', 'font-bold');
+            b.classList.add('bg-zinc-900', 'text-zinc-400');
+          });
+          btn.classList.remove('bg-zinc-900', 'text-zinc-400');
+          btn.classList.add('bg-gold-accent', 'text-obsidian', 'font-bold');
+          activeFilter = btn.getAttribute('data-filter');
+          renderFeed();
+        });
+      });
+
+      // Force Ingest Button
+      const forcePollBtn = document.getElementById('force-poll-btn');
+      const forcePollIcon = document.getElementById('force-poll-icon');
+      forcePollBtn.addEventListener('click', async () => {
+        forcePollIcon.classList.add('animate-spin');
+        countdownSeconds = pollIntervalVal;
+        try {
+          await fetch('/api/trigger-poll', { method: 'POST' });
+          setTimeout(() => {
+            forcePollIcon.classList.remove('animate-spin');
+          }, 1200);
+        } catch (e) {
+          forcePollIcon.classList.remove('animate-spin');
+        }
+      });
+
+      // Modal Controls
+      const modal = document.getElementById('simulate-modal');
+      const openModalBtn = document.getElementById('open-simulate-btn');
+      const closeModalBtn = document.getElementById('close-simulate-btn');
+      const cancelModalBtn = document.getElementById('cancel-simulate-btn');
+      const simForm = document.getElementById('simulate-form');
+
+      openModalBtn.addEventListener('click', () => {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      });
+
+      const hideModal = () => {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      };
+      closeModalBtn.addEventListener('click', hideModal);
+      cancelModalBtn.addEventListener('click', hideModal);
+
+      document.querySelectorAll('.preset-btn').forEach(b => {
+        b.addEventListener('click', () => {
+          document.getElementById('sim-title').value = b.getAttribute('data-title');
+          document.getElementById('sim-summary').value = b.getAttribute('data-summary');
+        });
+      });
+
+      simForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = document.getElementById('sim-title').value;
+        const summary = document.getElementById('sim-summary').value;
+        const submitBtn = document.getElementById('submit-simulate-btn');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Analyzing...';
+        renderIcons();
+
+        try {
+          const res = await fetch('/api/simulate-event', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, summary })
+          });
+          if (res.ok) {
+            hideModal();
+            simForm.reset();
+            const data = await res.json();
+            if (data.event) handleIncomingEvent(data.event);
+          }
+        } catch (err) {
+          alert('Error: ' + err.message);
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i><span>Inject Instant Shock</span>';
+          renderIcons();
+        }
+      });
+    }
+
+    // App Startup
+    window.addEventListener('DOMContentLoaded', async () => {
+      renderIcons();
+      setupInteractions();
+      await fetchInitialEvents();
+      initRealtimeStream();
+
+      // Check configured engine
+      fetch('/healthz').then(r => r.json()).then(h => {
+        const badge = document.getElementById('engine-model-badge');
+        if (h.groq_configured) badge.textContent = 'Groq Llama-3.3-70B';
+        else if (h.openai_configured) badge.textContent = 'OpenAI GPT-4o-Mini';
+        else badge.textContent = 'Quant Heuristic Engine';
+      }).catch(() => {});
+    });
+  </script>
+</body>
+</html>
