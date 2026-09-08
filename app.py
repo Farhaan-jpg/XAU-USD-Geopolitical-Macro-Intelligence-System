@@ -45,15 +45,19 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "").strip()
 
 # Resilient Model Cascades for Automatic Fallbacks
+# llama-3.1-8b-instant is universally available across all free and paid Groq tiers with sub-200ms latency.
 GROQ_CANDIDATE_MODELS = [m for m in [
     GROQ_MODEL,
-    "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
     "llama-3.1-70b-versatile",
-    "llama3-70b-8192",
-    "llama3-8b-8192",
+    "llama-3.2-11b-vision-preview",
+    "llama-3.2-3b-preview",
+    "llama-3.2-1b-preview",
     "mixtral-8x7b-32768",
     "gemma2-9b-it",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
 ] if m]
 
 OPENAI_CANDIDATE_MODELS = [m for m in [
@@ -511,6 +515,8 @@ async def call_groq_llm(title: str, summary: str, source: str) -> Optional[Dict[
                     return parsed
                 elif resp.status_code in [404, 400]:
                     # Model not found or not supported on this tier -> try next model in fallback cascade
+                    if _active_groq_model == model_name:
+                        _active_groq_model = None
                     logger.warning("Groq model '%s' unavailable (status %d). Automatically switching to fallback model...", model_name, resp.status_code)
                     continue
                 else:
@@ -563,6 +569,8 @@ async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dic
                         _active_openai_model = model_name
                     return parsed
                 elif resp.status_code in [404, 400]:
+                    if _active_openai_model == model_name:
+                        _active_openai_model = None
                     logger.warning("OpenAI model '%s' unavailable (status %d). Automatically switching to fallback model...", model_name, resp.status_code)
                     continue
                 else:
@@ -572,6 +580,37 @@ async def call_openai_llm(title: str, summary: str, source: str) -> Optional[Dic
             continue
 
     return None
+
+async def auto_select_working_ai_models():
+    """Proactively checks and caches the best accessible models on startup."""
+    global _active_groq_model, _active_openai_model
+
+    # 1. Groq Model Discovery
+    if GROQ_API_KEY:
+        try:
+            url = "https://api.groq.com/openai/v1/models"
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    available_ids = {m.get("id") for m in data.get("data", []) if isinstance(m, dict)}
+                    for candidate in GROQ_CANDIDATE_MODELS:
+                        if candidate in available_ids:
+                            _active_groq_model = candidate
+                            logger.info("Groq active AI model verified via account scan: %s", candidate)
+                            break
+        except Exception as e:
+            logger.debug("Groq auto-discovery check error: %s", e)
+
+        if not _active_groq_model and GROQ_CANDIDATE_MODELS:
+            _active_groq_model = GROQ_CANDIDATE_MODELS[0]
+            logger.info("Groq active model initialized to primary candidate: %s", _active_groq_model)
+
+    # 2. OpenAI Model Discovery
+    if OPENAI_API_KEY:
+        _active_openai_model = OPENAI_MODEL or "gpt-4o-mini"
+        logger.info("OpenAI active model set to: %s", _active_openai_model)
 
 async def analyze_headline(title: str, summary: str, source: str) -> Dict[str, Any]:
     """Runs LLM parsing using Groq -> OpenAI -> Quant Heuristic fallback."""
@@ -1073,6 +1112,7 @@ async def live_price_ticker_task():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await auto_select_working_ai_models()
     poller_worker = asyncio.create_task(background_poller_task())
     ticker_worker = asyncio.create_task(live_price_ticker_task())
     yield

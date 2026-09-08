@@ -1282,12 +1282,17 @@
       await fetchInitialEvents();
       initRealtimeStream();
 
-      // Check configured engine
+      // Check configured engine and display active AI model
       fetch('/healthz').then(r => r.json()).then(h => {
         const badge = document.getElementById('engine-model-badge');
-        if (h.groq_configured) badge.textContent = 'Groq Llama-3.3-70B';
-        else if (h.openai_configured) badge.textContent = 'OpenAI GPT-4o-Mini';
-        else badge.textContent = 'Quant Heuristic Engine';
+        if (h.groq_configured) {
+          const modelTag = h.groq_active_model ? h.groq_active_model.replace('llama-', 'Llama-').replace('llama', 'Llama-') : 'Active';
+          badge.textContent = `Groq (${modelTag})`;
+        } else if (h.openai_configured) {
+          badge.textContent = `OpenAI (${h.openai_active_model || 'GPT-4o'})`;
+        } else {
+          badge.textContent = 'Quant Heuristic Engine';
+        }
       }).catch(() => {});
     });
   </script>

@@ -82,13 +82,16 @@ Add the following keys:
 |---|---|---|
 | `PYTHON_VERSION` | `3.11.9` | Ensures stable Linux build |
 | `POLL_INTERVAL_SECONDS` | `25` | Feed polling frequency in seconds |
-| `GROQ_API_KEY` | `gsk_...` | (Optional) High-speed Llama-3.3-70B API key |
+| `GROQ_API_KEY` | `gsk_...` | (Optional) High-speed Groq API key |
+| `GROQ_MODEL` | `llama-3.1-8b-instant` | (Optional) Primary Groq model. Auto-cascades to `llama-3.3-70b`, `llama-3.1-70b`, `mixtral`, `gemma2` |
 | `OPENAI_API_KEY` | `sk-...` | (Optional) Alternative LLM key |
+| `OPENAI_MODEL` | `gpt-4o-mini` | (Optional) Defaults to `gpt-4o-mini`, auto-cascades to `gpt-4o`, `gpt-3.5-turbo` |
 | `TELEGRAM_BOT_TOKEN` | `123456:ABC...` | (Optional) Telegram bot token |
 | `TELEGRAM_CHAT_ID` | `-100...` or `@channel` | (Optional) Telegram channel or group ID |
 
-> [!NOTE]
-> If you do not have a Groq or OpenAI key, leave them blank! The system will automatically use the built-in **Deterministic Quantitative Macro Heuristic Engine** ($r = y - \pi$ real yields, safe-haven flight, DXY debasement) so the dashboard and alerts work 100% out-of-the-box.
+> [!TIP]
+> **Resilient Multi-Model AI Cascade**:
+> If a Groq model is unavailable on your account tier (e.g. `llama-3.3-70b-versatile` returning 404), the engine automatically switches to `llama-3.1-8b-instant`, `llama-3.1-70b-versatile`, `mixtral-8x7b-32768`, or `gemma2-9b-it` without dropping events. If all LLMs are unreachable, it fails open to the **Deterministic Quantitative Macro Heuristic Engine** ($r = y - \pi$ real yields, safe-haven flight, DXY debasement) so the system never stops.
 
 Click **Save Changes**. Render will automatically build and deploy your app. Once deployed, Render will provide a public URL:
 `https://xauusd-intelligence.onrender.com`
