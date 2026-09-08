@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AUREUS // XAU/USD Real-Time Geopolitical & Macro Intelligence</title>
+  <title>AUREUS // XAU/USD Real-Time Intelligence & OANDA Live Feed</title>
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -43,7 +43,7 @@
           },
           keyframes: {
             slideIn: {
-              '0%': { opacity: '0', transform: 'translateY(-14px) scale(0.98)' },
+              '0%': { opacity: '0', transform: 'translateY(-12px) scale(0.99)' },
               '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
             },
             flashGreen: {
@@ -64,13 +64,13 @@
     body {
       background-color: #09090b;
       background-image: 
-        radial-gradient(at 0% 0%, rgba(212, 175, 55, 0.06) 0px, transparent 45%),
+        radial-gradient(at 0% 0%, rgba(212, 175, 55, 0.07) 0px, transparent 45%),
         radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.04) 0px, transparent 50%),
         radial-gradient(at 50% 50%, rgba(14, 165, 233, 0.02) 0px, transparent 60%);
       color: #f4f4f5;
     }
     .glass-card {
-      background: rgba(18, 18, 22, 0.8);
+      background: rgba(18, 18, 22, 0.82);
       backdrop-filter: blur(14px);
       border: 1px solid rgba(39, 39, 42, 0.85);
     }
@@ -81,7 +81,10 @@
       box-shadow: 0 0 20px -3px rgba(212, 175, 55, 0.22);
     }
     .glow-critical {
-      box-shadow: 0 0 24px -2px rgba(244, 63, 94, 0.4);
+      box-shadow: 0 0 24px -2px rgba(244, 63, 94, 0.45);
+    }
+    .glow-latest {
+      box-shadow: 0 0 24px -2px rgba(212, 175, 55, 0.35);
     }
     ::-webkit-scrollbar {
       width: 5px;
@@ -101,7 +104,7 @@
 </head>
 <body class="min-h-screen font-sans antialiased text-zinc-100 flex flex-col selection:bg-gold-accent/30 selection:text-amber-200">
 
-  <!-- ================= 1. GLOBAL MARKET SESSIONS TICKER BAR ================= -->
+  <!-- ================= 1. GLOBAL MARKET SESSIONS BAR ================= -->
   <div class="border-b border-zinc-900 bg-obsidian/95 px-4 lg:px-8 py-1.5 text-[11px] font-mono text-zinc-400">
     <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
       
@@ -127,13 +130,14 @@
           <span id="clock-tokyo" class="text-zinc-200">00:00</span>
         </div>
         <div id="overlap-indicator" class="hidden text-[10px] px-2 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold animate-pulse">
-          ⚡ PEAK GOLD VOLATILITY (LDN / NY OVERLAP)
+          ⚡ PEAK GOLD VOLATILITY (LONDON / NY OVERLAP)
         </div>
       </div>
 
-      <!-- Live Pipeline Protocol -->
+      <!-- Feed & Protocol State -->
       <div class="flex items-center gap-3">
         <div class="flex items-center gap-1.5 text-zinc-400">
+          <span class="px-1.5 py-0.2 rounded bg-amber-500/10 text-gold-accent border border-gold-accent/30 text-[10px] font-bold">OANDA PRICING</span>
           <span id="protocol-badge" class="px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px]">WEBSOCKET</span>
           <span id="conn-latency-text" class="text-zinc-500">0ms latency</span>
         </div>
@@ -142,7 +146,7 @@
     </div>
   </div>
 
-  <!-- ================= 2. MAIN HEADER & SPOT PRICE TICKER ================= -->
+  <!-- ================= 2. MAIN HEADER & OANDA SPOT PRICE TICKER ================= -->
   <header class="sticky top-0 z-50 border-b border-surfaceBorder bg-obsidian/90 backdrop-blur-md px-4 lg:px-8 py-3">
     <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
       
@@ -157,33 +161,36 @@
               <span class="font-mono font-bold tracking-wider text-base text-zinc-100">AUREUS</span>
               <span class="text-[10px] px-2 py-0.5 rounded bg-gold-accent/10 text-gold-accent border border-gold-accent/30 font-mono font-semibold">XAU/USD QUANT INTELLIGENCE</span>
             </div>
-            <p class="text-[11px] text-zinc-400 font-mono">Zero-Latency Event-Driven Macro Engine</p>
+            <p class="text-[11px] text-zinc-400 font-mono">Zero-Latency Real-Time News & OANDA Spot Feed</p>
           </div>
         </div>
 
-        <!-- Mobile Real-Time Indicator -->
+        <!-- Mobile Live Dot -->
         <div class="flex items-center gap-1.5 md:hidden">
           <span id="mobile-live-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse-fast"></span>
         </div>
       </div>
 
-      <!-- Live XAU/USD Spot Price Widget -->
+      <!-- OANDA LIVE SPOT PRICE WIDGET -->
       <div class="flex items-center justify-between md:justify-center gap-3 px-4 py-1.5 rounded-xl bg-zinc-900/90 border border-zinc-800 shadow-inner">
         <div class="flex items-center gap-2">
-          <span class="font-mono font-bold text-xs text-amber-400">SPOT XAU/USD:</span>
+          <div class="flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>OANDA</span>
+          </div>
           <span id="ticker-price" class="text-lg font-mono font-extrabold tracking-tight text-zinc-100 transition-colors px-1 rounded">
-            $2,654.50
+            $4,433.50
           </span>
-          <span id="ticker-delta-pill" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
-            ▲ +0.20
+          <span id="ticker-delta-pill" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
+            ▲ +0.62%
           </span>
         </div>
 
         <div class="hidden sm:flex items-center gap-3 text-[11px] font-mono border-l border-zinc-800 pl-3 text-zinc-400">
-          <div>BID: <span id="ticker-bid" class="text-zinc-200">2,654.30</span></div>
-          <div>ASK: <span id="ticker-ask" class="text-zinc-200">2,654.65</span></div>
-          <div>SPREAD: <span id="ticker-spread" class="text-amber-300">0.35</span></div>
-          <div class="hidden lg:block text-zinc-500">RANGE: <span id="ticker-range" class="text-zinc-300">2642.10 - 2668.20</span></div>
+          <div>BID: <span id="ticker-bid" class="text-zinc-200">4,433.10</span></div>
+          <div>ASK: <span id="ticker-ask" class="text-zinc-200">4,433.62</span></div>
+          <div>SPREAD: <span id="ticker-spread" class="text-amber-300 font-semibold">0.52</span></div>
+          <div class="hidden lg:block text-zinc-500">RANGE: <span id="ticker-range" class="text-zinc-300">4406.30 - 4443.00</span></div>
         </div>
       </div>
 
@@ -292,7 +299,7 @@
 
     </section>
 
-    <!-- ================= 4. MACRO CORRELATION MATRIX WIDGET ================= -->
+    <!-- ================= 4. MACRO TRANSMISSION MATRIX WIDGET ================= -->
     <section class="glass-card p-5 rounded-xl">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3.5 border-b border-zinc-800/80 pb-3">
         <div class="flex items-center gap-2">
@@ -412,7 +419,7 @@
 
     </section>
 
-    <!-- ================= 6. LIVE STREAMING EVENT FEED ================= -->
+    <!-- ================= 6. LIVE STREAMING EVENT FEED (NEWEST FIRST) ================= -->
     <section class="space-y-3.5">
       <div class="flex items-center justify-between text-xs text-zinc-400 font-mono">
         <div class="flex items-center gap-2">
@@ -421,15 +428,16 @@
             <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
           </span>
           <span class="font-bold text-zinc-200">REAL-TIME QUANT INTELLIGENCE STREAM (<span id="event-display-count">0</span>)</span>
+          <span class="text-[10px] text-amber-400 font-semibold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">NEWEST FIRST</span>
         </div>
-        <span class="text-zinc-500 text-[11px]">Instant Push Updates (WebSockets / SSE)</span>
+        <span class="text-zinc-500 text-[11px]">Instant Chronological Stream</span>
       </div>
 
       <!-- Events Container -->
       <div id="events-container" class="space-y-3.5">
         <div id="loading-skeleton" class="glass-card p-8 rounded-xl text-center py-12 text-zinc-500">
           <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-3 text-gold-accent"></i>
-          <p class="font-mono text-sm">Synchronizing real-time SQLite stream...</p>
+          <p class="font-mono text-sm">Synchronizing real-time chronological intelligence feed...</p>
         </div>
       </div>
     </section>
@@ -451,7 +459,7 @@
       </div>
 
       <p class="text-xs text-zinc-400">
-        Inject an instantaneous shock scenario to observe the quantitative transmission engine, momentum calculator, and real-time dashboard broadcast.
+        Inject an instantaneous shock scenario. The event will be stamped with the current timestamp and will immediately display at the <b>very top (#1 position)</b> of the stream.
       </p>
 
       <!-- Preset Scenarios -->
@@ -515,10 +523,10 @@
     <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
       <div class="flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-gold-accent"></span>
-        <span>AUREUS // XAU-USD EVENT-DRIVEN QUANT PLATFORM</span>
+        <span>AUREUS // XAU-USD EVENT-DRIVEN QUANT PLATFORM (OANDA FEED)</span>
       </div>
       <div>
-        <span>FastAPI • WebSockets + SSE • Parallel Ingestion • SQLite WAL</span>
+        <span>FastAPI • WebSockets • OANDA Live Quotes • Chronological Newest-First Feed</span>
       </div>
     </div>
   </footer>
@@ -588,7 +596,7 @@
         const date = new Date(dateString);
         if (isNaN(date.getTime())) return dateString;
         const seconds = Math.floor((new Date() - date) / 1000);
-        if (seconds < 20) return 'Just now';
+        if (seconds < 15) return 'Just now';
         if (seconds < 60) return `${seconds}s ago`;
         const minutes = Math.floor(seconds / 60);
         if (minutes < 60) return `${minutes}m ago`;
@@ -610,25 +618,21 @@
       const pad = (n) => String(n).padStart(2, '0');
       document.getElementById('clock-utc').textContent = `${pad(utcHours)}:${pad(utcMins)}:${pad(utcSecs)}`;
 
-      // London (UTC+0 / UTC+1)
       const ldnHours = (utcHours + 1) % 24;
       document.getElementById('clock-london').textContent = `${pad(ldnHours)}:${pad(utcMins)}`;
       const isLdnActive = utcHours >= 8 && utcHours < 16;
       document.getElementById('badge-london').className = `w-1.5 h-1.5 rounded-full ${isLdnActive ? 'bg-emerald-400 animate-ping' : 'bg-zinc-600'}`;
 
-      // New York (UTC-4 / UTC-5)
       const nyHours = (utcHours + 20) % 24;
       document.getElementById('clock-ny').textContent = `${pad(nyHours)}:${pad(utcMins)}`;
       const isNyActive = utcHours >= 13 && utcHours < 21;
       document.getElementById('badge-ny').className = `w-1.5 h-1.5 rounded-full ${isNyActive ? 'bg-emerald-400 animate-ping' : 'bg-zinc-600'}`;
 
-      // Tokyo (UTC+9)
       const tokyoHours = (utcHours + 9) % 24;
       document.getElementById('clock-tokyo').textContent = `${pad(tokyoHours)}:${pad(utcMins)}`;
       const isTokyoActive = utcHours >= 0 && utcHours < 9;
       document.getElementById('badge-tokyo').className = `w-1.5 h-1.5 rounded-full ${isTokyoActive ? 'bg-emerald-400' : 'bg-zinc-600'}`;
 
-      // Peak Gold Volatility Overlap: London & New York (13:00 to 16:30 UTC)
       const isOverlap = isLdnActive && isNyActive;
       const overlapElem = document.getElementById('overlap-indicator');
       if (isOverlap) {
@@ -652,7 +656,7 @@
     }
     setInterval(runCountdown, 1000);
 
-    // Live Spot Gold Price Ticker Engine
+    // OANDA Live Spot Price Ticker Engine
     function updatePriceTicker(data) {
       if (!data) return;
       const priceElem = document.getElementById('ticker-price');
@@ -662,23 +666,22 @@
       const spreadElem = document.getElementById('ticker-spread');
       const rangeElem = document.getElementById('ticker-range');
 
-      const currentPrice = parseFloat(priceElem.textContent.replace('$', '').trim());
       const newPrice = data.price;
-
       priceElem.textContent = `$${newPrice.toFixed(2)}`;
       bidElem.textContent = data.bid.toFixed(2);
       askElem.textContent = data.ask.toFixed(2);
       spreadElem.textContent = data.spread.toFixed(2);
       rangeElem.textContent = `${data.day_low.toFixed(2)} - ${data.day_high.toFixed(2)}`;
 
-      if (data.delta > 0) {
+      const changePct = data.change_pct || 0;
+      if (data.delta > 0 || changePct > 0) {
         priceElem.className = 'text-lg font-mono font-extrabold tracking-tight text-emerald-400 px-1 rounded animate-flash-green';
         deltaPill.className = 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold';
-        deltaPill.textContent = `▲ +${data.delta.toFixed(2)}`;
-      } else if (data.delta < 0) {
+        deltaPill.textContent = `▲ +${changePct.toFixed(2)}%`;
+      } else if (data.delta < 0 || changePct < 0) {
         priceElem.className = 'text-lg font-mono font-extrabold tracking-tight text-rose-400 px-1 rounded animate-flash-red';
         deltaPill.className = 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold';
-        deltaPill.textContent = `▼ ${data.delta.toFixed(2)}`;
+        deltaPill.textContent = `▼ ${changePct.toFixed(2)}%`;
       }
     }
 
@@ -699,6 +702,15 @@
       document.getElementById('stat-bearish-count').textContent = `${bearish} Bearish`;
       document.getElementById('stat-critical-count').textContent = critical;
       document.getElementById('stat-total-processed').textContent = total;
+    }
+
+    // Strict Chronological Sort Helper (Newest First)
+    function sortEventsDescending(list) {
+      return list.sort((a, b) => {
+        const timeA = new Date(a.published_at || a.created_at).getTime() || 0;
+        const timeB = new Date(b.published_at || b.created_at).getTime() || 0;
+        return timeB - timeA;
+      });
     }
 
     // Badge Renderers
@@ -740,15 +752,28 @@
       `;
     }
 
-    function createEventCardHtml(ev) {
+    // Card Renderer with #1 LATEST FLASH Indicator
+    function createEventCardHtml(ev, index) {
       const isCritical = ev.severity === 'CRITICAL';
-      const cardBorderClass = isCritical ? 'border-rose-500/50 glow-critical ring-1 ring-rose-500/30' : 'border-zinc-800/90';
+      const isLatest = index === 0;
+      let cardBorderClass = 'border-zinc-800/90';
+      if (isCritical) {
+        cardBorderClass = 'border-rose-500/50 glow-critical ring-1 ring-rose-500/30';
+      } else if (isLatest) {
+        cardBorderClass = 'border-gold-accent/60 glow-latest ring-1 ring-gold-accent/30';
+      }
       const corr = ev.correlated_assets_impact || {};
 
       return `
         <article class="glass-card p-5 rounded-xl border ${cardBorderClass} animate-slide-in transition-all relative overflow-hidden group" id="event-${ev.id}">
           <div class="flex flex-wrap items-center justify-between gap-2 mb-2.5">
             <div class="flex items-center gap-2">
+              ${isLatest ? `
+                <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-mono font-bold tracking-wider flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                  LATEST FLASH
+                </span>
+              ` : ''}
               <span class="text-xs font-mono font-medium px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">
                 ${escapeHtml(ev.source)}
               </span>
@@ -886,7 +911,7 @@
     }
 
     function filterEvents() {
-      return allEvents.filter(ev => {
+      const filtered = allEvents.filter(ev => {
         if (searchQuery) {
           const q = searchQuery.toLowerCase();
           const match = (ev.title || '').toLowerCase().includes(q) ||
@@ -907,6 +932,9 @@
 
         return true;
       });
+
+      // Always enforce chronological descending order
+      return sortEventsDescending(filtered);
     }
 
     function renderFeed() {
@@ -922,15 +950,16 @@
           </div>
         `;
       } else {
-        container.innerHTML = filtered.map(ev => createEventCardHtml(ev)).join('');
+        container.innerHTML = filtered.map((ev, idx) => createEventCardHtml(ev, idx)).join('');
       }
       renderIcons();
     }
 
-    // Handle Incoming Event with Zero Delay
+    // Handle Incoming Event with Zero Delay (Prepend to top)
     function handleIncomingEvent(event) {
       if (!allEvents.some(item => item.id === event.id)) {
         allEvents.unshift(event);
+        sortEventsDescending(allEvents);
         if (allEvents.length > 80) allEvents.pop();
 
         if (event.severity === 'CRITICAL' || event.severity === 'HIGH') {
@@ -957,7 +986,6 @@
           protocolBadge.textContent = 'WEBSOCKET ACTIVE';
           protocolBadge.className = 'px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold';
           latencyText.textContent = '<5ms stream';
-          // Ping heartbeat
           setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
               lastPingTime = Date.now();
@@ -981,7 +1009,6 @@
         };
 
         ws.onerror = () => {
-          // Fallback to SSE
           initSSEFallback();
         };
 
@@ -997,7 +1024,6 @@
     function initSSEFallback() {
       if (eventSource) return;
       const protocolBadge = document.getElementById('protocol-badge');
-      const latencyText = document.getElementById('conn-latency-text');
 
       eventSource = new EventSource('/api/events/stream');
       protocolBadge.textContent = 'SSE ACTIVE';
@@ -1017,10 +1043,21 @@
         const res = await fetch('/api/events?limit=50');
         if (res.ok) {
           const data = await res.json();
-          allEvents = data.events || [];
+          allEvents = sortEventsDescending(data.events || []);
           renderFeed();
           if (allEvents.length > 0) updateCorrelationMatrix(allEvents[0]);
           computeDynamicStats();
+        }
+      } catch (e) {}
+    }
+
+    // Initial OANDA Price Fetch
+    async function fetchInitialOandaPrice() {
+      try {
+        const res = await fetch('/api/price/oanda');
+        if (res.ok) {
+          const data = await res.json();
+          updatePriceTicker(data);
         }
       } catch (e) {}
     }
@@ -1146,6 +1183,7 @@
     window.addEventListener('DOMContentLoaded', async () => {
       renderIcons();
       setupInteractions();
+      await fetchInitialOandaPrice();
       await fetchInitialEvents();
       initRealtimeStream();
 

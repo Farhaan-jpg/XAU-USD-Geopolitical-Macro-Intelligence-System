@@ -96,36 +96,68 @@ async def test_telegram_formatter():
     print("  [PASS] Telegram HTML formatting generated properly with emojis, momentum & cross-asset breakdown")
 
 async def test_database_persistence():
-    print("\n--- 3. Testing SQLite Storage & Deduplication ---")
+    print("\n--- 3. Testing SQLite Storage & Strict Epoch Sorting ---")
     await init_db()
     
-    dummy_event = IntelligenceEvent(
-        id="test-db-001",
-        source="Test Feed",
-        title="Central Banks Boost Gold Reserves",
-        summary="Official sector bullion purchases exceed 1,000 tonnes.",
-        link="https://gold.org",
-        published_at=datetime.now(timezone.utc).isoformat(),
+    # Insert an older event (epoch = 1000.0)
+    older_event = IntelligenceEvent(
+        id="test-db-older",
+        source="Test Feed Older",
+        title="Older Central Bank Bulletin",
+        summary="Historical bullion reserves recap.",
+        link="https://gold.org/old",
+        published_at="2026-08-01T12:00:00Z",
+        published_epoch=1785585600.0,
         relevance=True,
-        severity="HIGH",
-        gold_bias="BULLISH",
-        potential_momentum="5-15 pips drift",
-        transmission_mechanism="Structural central bank reserve diversification away from fiat sovereign debt.",
+        severity="LOW",
+        gold_bias="NEUTRAL",
+        potential_momentum="Muted/Noise",
+        transmission_mechanism="Routine reserve accounting.",
         correlated_assets_impact=CorrelatedAssets(
-            DXY=AssetImpact(direction="NEUTRAL", logic="Slow de-dollarization."),
-            US10Y_TIPS=AssetImpact(direction="NEUTRAL", logic="Long-term reserve shift."),
-            WTI_Crude=AssetImpact(direction="NEUTRAL", logic="No oil impact."),
-            Silver_XAG=AssetImpact(direction="BULLISH", logic="Precious metals demand spillover."),
-            VIX=AssetImpact(direction="NEUTRAL", logic="Calm macro conditions.")
+            DXY=AssetImpact(direction="NEUTRAL", logic="No effect."),
+            US10Y_TIPS=AssetImpact(direction="NEUTRAL", logic="No effect."),
+            WTI_Crude=AssetImpact(direction="NEUTRAL", logic="No effect."),
+            Silver_XAG=AssetImpact(direction="NEUTRAL", logic="No effect."),
+            VIX=AssetImpact(direction="NEUTRAL", logic="No effect.")
+        )
+    )
+    # Insert a newer event (epoch = 2000.0)
+    newer_event = IntelligenceEvent(
+        id="test-db-newer",
+        source="Test Feed Newer",
+        title="Breaking Flash: Emergency Gold Buying Surge",
+        summary="Fresh liquidity injection into sovereign physical bullion.",
+        link="https://gold.org/new",
+        published_at="2026-09-08T10:00:00Z",
+        published_epoch=1788861600.0,
+        relevance=True,
+        severity="CRITICAL",
+        gold_bias="STRONG_BULLISH",
+        potential_momentum="15-40+ pips explosive",
+        transmission_mechanism="Aggressive sudden physical bullion allocation.",
+        correlated_assets_impact=CorrelatedAssets(
+            DXY=AssetImpact(direction="BEARISH", logic="De-dollarization."),
+            US10Y_TIPS=AssetImpact(direction="BEARISH", logic="Real yields collapse."),
+            WTI_Crude=AssetImpact(direction="BULLISH", logic="Inflation flight."),
+            Silver_XAG=AssetImpact(direction="STRONG_BULLISH", logic="High-beta rally."),
+            VIX=AssetImpact(direction="BULLISH", logic="Volatility surge.")
         )
     )
 
-    await store_event(dummy_event)
-    recent = await get_recent_events(limit=10)
-    assert len(recent) >= 1
-    found = any(e["id"] == "test-db-001" for e in recent)
-    assert found is True
-    print("  [PASS] Successfully persisted and retrieved event from SQLite (WAL mode)")
+    # Store older first, then newer
+    await store_event(older_event)
+    await store_event(newer_event)
+
+    recent = await get_recent_events(limit=200)
+    assert len(recent) >= 2
+    
+    # Locate indices of both test events
+    idx_newer = next((i for i, e in enumerate(recent) if e["id"] == "test-db-newer"), -1)
+    idx_older = next((i for i, e in enumerate(recent) if e["id"] == "test-db-older"), -1)
+
+    assert idx_newer != -1 and idx_older != -1
+    assert idx_newer < idx_older, f"Newer event (idx {idx_newer}) must appear BEFORE older event (idx {idx_older})!"
+    print(f"  [PASS] Strict descending epoch order verified: newer (epoch {newer_event.published_epoch}) appears at index {idx_newer} ahead of older (epoch {older_event.published_epoch}) at index {idx_older}")
 
 async def test_live_feed_ingestion():
     print("\n--- 4. Testing Feed Fetchers ---")
@@ -153,6 +185,15 @@ async def test_api_endpoints():
         assert ping_resp.status_code == 200
         assert ping_resp.text.strip('"') == "pong"
         print("  [PASS] GET /ping returned 200 OK (pong)")
+
+        # OANDA Live Price endpoint
+        o_resp = await client.get("/api/price/oanda")
+        assert o_resp.status_code == 200
+        o_data = o_resp.json()
+        assert "price" in o_data
+        assert "bid" in o_data
+        assert "ask" in o_data
+        print(f"  [PASS] GET /api/price/oanda returned 200 OK (${o_data['price']} | Spread: {o_data.get('spread')})")
 
         # Healthz
         h_resp = await client.get("/healthz")
